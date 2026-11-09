@@ -925,7 +925,7 @@ bits), 16–17 = real EtherType
 
 IPv4 (20–60)
 
-0 version (high nibble) / IHL in 4-byte words (low nibble)  —  2–3 total length  — 
+0 version (high nibble) / IHL in 4-byte words (low nibble)  —  2–3 total length  —
 4–5 id  —  6–7 flags (0x2000 = more fragments) + fragment offset (low 13 bits)  —  8
 TTL  —  9 protocol: 1 ICMP, 6 TCP, 17 UDP  —  10–11 checksum  —  12–15 source  —  16–19
 destination  —  20+ options, if IHL > 5
@@ -973,4 +973,3 @@ or atomic adds keep counters exact.
 
 Bounded loops are allowed (Linux 5.3+). The verifier still has to prove they end.
 ```
-

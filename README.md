@@ -61,7 +61,11 @@ inode; do not delete it while a daemon is running.
 
 ## Contribute and raise a PR
 
-Use the three implementation issues for ownership and acceptance criteria.
+Use the three implementation issues for ownership and acceptance criteria:
+
+- [Person A: XDP dataplane](https://github.com/TANKominator5/BytecodeBouncer/issues/1)
+- [Person B: control plane and reload](https://github.com/TANKominator5/BytecodeBouncer/issues/2)
+- [Person C: observability and test bench](https://github.com/TANKominator5/BytecodeBouncer/issues/3)
 
 ```sh
 git fetch origin
