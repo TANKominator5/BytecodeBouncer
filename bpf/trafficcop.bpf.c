@@ -1,29 +1,137 @@
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
 #include "contract.h"
+#include "parse.h"
+
+#define ARRAY_MAP(name, kind, count, value_type) \
+    struct { \
+        __uint(type, kind); __uint(max_entries, count); \
+        __type(key, __u32); __type(value, value_type); \
+    } name SEC(".maps")
+#define SOURCE_MAP(name, count, value_type) \
+    struct { \
+        __uint(type, BPF_MAP_TYPE_HASH); __uint(max_entries, count); \
+        __uint(map_flags, BPF_F_NO_PREALLOC); \
+        __type(key, struct tc_address); __type(value, value_type); \
+    } name SEC(".maps")
+
+ARRAY_MAP(counters, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_counters);
+ARRAY_MAP(health, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_health);
+ARRAY_MAP(config, BPF_MAP_TYPE_ARRAY, 1, struct tc_config);
+ARRAY_MAP(rule_counters, BPF_MAP_TYPE_PERCPU_ARRAY, TC_MAX_RULES, struct tc_rule_counters);
+SOURCE_MAP(sources, TC_STATE_SOURCES, __u64);
+SOURCE_MAP(jail, TC_STATE_SOURCES, struct tc_jail_value);
+SOURCE_MAP(scans, TC_SCAN_SOURCES, struct tc_scan_value);
+
+struct bucket_map {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, TC_BUCKET_SOURCES);
+    __type(key, struct tc_address);
+    __type(value, struct tc_bucket_value);
+};
+/* A concrete instance keeps the inner value's full BTF (not a forward decl).
+ * Userspace may reuse this map for the first limit rule. */
+struct bucket_map bucket_template SEC(".maps");
 struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
+    __uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
+    __uint(max_entries, TC_MAX_RULES);
     __type(key, __u32);
-    __type(value, struct tc_counters);
-} counters SEC(".maps");
-/* Bootstrap only: no filtering until the rule-engine implementation lands. */
+    __array(values, struct bucket_map);
+} buckets SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, TC_MAX_PREFIXES);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct tc_set_key);
+    __type(value, __u32);
+} sets SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24);
+} events SEC(".maps");
+
+/* Read-only zero seed avoids an 8 KiB stack allocation on first scan packet. */
+static const struct tc_scan_value empty_scan;
+/* Retain the event schema in ELF BTF for consumers' layout checks. */
+const struct tc_event event_abi = {};
+
+#include "match.h"
+#include "state.h"
+#include "actions.h"
+
 SEC("xdp") int trafficcop(struct xdp_md *ctx)
 {
-    __u32 key = 0;
-    struct tc_counters *c = bpf_map_lookup_elem(&counters, &key);
-    unsigned char *data = (void *)(long)ctx->data;
-    unsigned char *end = (void *)(long)ctx->data_end;
-    if (c) {
-        c->passed++;
-        /* Short/unknown Ethernet frames are explicitly counted as other. */
-        if (data + 14 > end ||
-            !((data[12] == 0x08 && data[13] == 0x00) ||
-              (data[12] == 0x86 && data[13] == 0xdd)))
-            c->other++;
-        else
-            c->default_hits++;
+    __u32 zero = 0;
+    struct tc_counters *c = bpf_map_lookup_elem(&counters, &zero);
+    struct tc_health *h = bpf_map_lookup_elem(&health, &zero);
+    __u8 *data = (void *)(long)ctx->data;
+    __u8 *end = (void *)(long)ctx->data_end;
+    struct tc_packet packet = {};
+    int parsed = parse_packet(data, end, &packet);
+    if (parsed == TC_OTHER) {
+        if (c) c->other++;
+        return finish(c, TC_PASS);
     }
-    return XDP_PASS;
+    if (parsed == TC_MALFORMED) {
+        if (c) c->malformed++;
+        return finish(c, TC_DROP);
+    }
+    count_source(&packet.src, h);
+    __u64 now = bpf_ktime_get_ns();
+    if (is_jailed(&packet.src, now)) {
+        if (c) c->jailed++;
+        return finish(c, TC_DROP);
+    }
+    /* This one immutable map belongs to this program generation. Never reread
+     * a mutable global selector halfway through processing a frame. */
+    struct tc_config *cfg = bpf_map_lookup_elem(&config, &zero);
+    if (!cfg) {
+        if (h) h->config_missing++;
+        return finish(c, TC_DROP);
+    }
+    if (packet.has_ports && cfg->scan_ports && scan_source(&packet, cfg, now, h)) {
+        if (c) c->jailed++;
+        return finish(c, TC_DROP);
+    }
+    struct match_context match = { .packet = &packet, .cfg = cfg, .index = -1 };
+    bpf_loop(TC_MAX_RULES, match_rule, &match, 0);
+    if (match.index >= 0 && match.index < TC_MAX_RULES) {
+        __u32 index = match.index;
+        struct tc_rule *rule = &cfg->rules[index];
+        int verdict = rule->action;
+        if (verdict == TC_LIMIT)
+            verdict = take_token(index, &packet.src, rule, now, h) ? TC_PASS : TC_DROP;
+        else if (verdict == TC_JAIL) {
+            jail_source(&packet.src, now + (__u64)rule->jail_seconds * 1000000000, h);
+            verdict = TC_DROP;
+        } else if (verdict == TC_BOUNCE) {
+            /* Re-establish the writable packet bounds after helper calls. */
+            data = (void *)(long)ctx->data;
+            end = (void *)(long)ctx->data_end;
+            if (data + 14 > end)
+                verdict = TC_DROP;
+            else {
+#pragma unroll
+                for (int i = 0; i < 6; i++) {
+                    __u8 tmp = data[i];
+                    data[i] = data[i + 6];
+                    data[i + 6] = tmp;
+                }
+            }
+        } else if (verdict == TC_HONEYPOT) {
+            /* Never silently fall back to PASS when redirect cannot be set up. */
+            verdict = bpf_redirect(cfg->honeypot_ifindex, 0);
+        }
+        if (verdict < TC_DROP || verdict > TC_HONEYPOT)
+            verdict = TC_DROP;
+        count_rule(index, verdict);
+        if (rule->log)
+            log_decision(&packet, cfg->generation, rule->line, verdict, now, h);
+        return finish(c, verdict);
+    }
+    if (packet.nonfirst)
+        return finish(c, cfg->fragment_action == TC_PASS ? TC_PASS : TC_DROP);
+    if (c) c->default_hits++;
+    return finish(c, cfg->default_action == TC_DROP ? TC_DROP : TC_PASS);
 }
 char LICENSE[] SEC("license") = "GPL";
