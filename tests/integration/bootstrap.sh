@@ -18,9 +18,11 @@ ip -n "$ns" link set players up
 ip -n "$ns" link set lo up
 run() { nsenter --net="/run/netns/$ns" "$@"; }
 # Failed validation must not attach anything.
+echo 'EXPECTED FAILURE: unsupported start arguments (the following error is intentional)'
 if run ./trafficcop start eth0 /dev/null extra; then echo 'unexpected unsupported-argument success' >&2; exit 1; fi
 [[ ! -S /run/trafficcop/control.sock ]]
 # Attachment failure must release the socket, lock and HTTP listener.
+echo 'EXPECTED FAILURE: nonexistent interface (the following error is intentional)'
 if run ./trafficcop start nonexistent0 tests/fixtures/bootstrap.rules; then echo 'unexpected attachment success' >&2; exit 1; fi
 [[ ! -S /run/trafficcop/control.sock ]]
 SECONDS=0

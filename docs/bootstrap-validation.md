@@ -22,3 +22,19 @@ runtime, four-CPU stress, hidden-harness compatibility, full grammar/filtering,
 reload, lossless logging, bounce or honeypot redirect. GitHub Actions is configured
 to run the bootstrap on Ubuntu 24.04; inspect its result rather than assuming it
 passed. No full-firewall performance or completion claim is made.
+
+## Persistent demo setup
+
+Added `demo.sh start|stats|dashboard|stop`. Verified with
+`sudo tests/integration/demo.sh`: startup, duplicate-start refusal, JSON stats,
+host localhost proxy serving the page and stats, stop while proxy is active,
+namespace/socket removal, repeated stop and stopped stats refusal.
+An initial manual test exposed the demo lock being inherited by the daemon;
+closing the lock descriptor when invoking trafficcop fixes that lifecycle issue.
+The existing bootstrap integration checks also pass with labelled expected errors.
+
+Live shutdown inspection on 10 November 2026 confirmed the running demo had a
+native trafficcop XDP attachment and an HTTP listener only inside its namespace.
+After `sudo ./demo.sh stop`, the specific daemon PID and BPF program ID were gone,
+the namespace/demo state/control socket were absent, host port 8088 could be
+bound, stats correctly failed as stopped, and a second stop succeeded harmlessly.

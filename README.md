@@ -37,14 +37,31 @@ cleanup. It checks readiness/time limits, native XDP attachment, packet counters
 stats HTTP schema, singleton handling, unsupported commands, detach and restart.
 Never attach this scaffold to a production interface.
 
-Inside your own test namespace (enter with `nsenter --net=...`):
+For a persistent demo, the setup script creates its own namespace and veth pair:
 
 ```sh
-./trafficcop start eth0 tests/fixtures/bootstrap.rules
-./trafficcop stats
-# Dashboard: http://127.0.0.1:8088/ inside that network namespace
-./trafficcop stop
+sudo ./demo.sh start
+sudo ./demo.sh stats
+sudo ./demo.sh dashboard
 ```
+
+The last command runs a foreground localhost proxy. Open **http://127.0.0.1:8088/**
+in your normal browser. Ctrl+C stops the proxy; the demo remains running.
+The proxy uses Python's standard library and forwards only the dashboard and
+stats endpoints into the namespace. It fails clearly if host port 8088 is busy.
+
+When finished:
+
+```sh
+sudo ./demo.sh stop
+```
+
+Stop removes the owned namespace and stops its trafficcop instance. If you left
+the foreground dashboard proxy running in another terminal, stop it with Ctrl+C.
+Repeated stop is harmless. Start refuses existing resources or another instance;
+namespace/socket ownership is checked before cleanup. Failed startup rolls back
+resources it created. Build and demo setup remain separate; `trafficcop start`
+still operates on an existing interface as the grading harness requires.
 
 Only blank lines, comments and one optional `default pass` are accepted. `reload`,
 `set`, `jail`, `unjail`, `log`, filtering and the honeypot argument are explicitly
