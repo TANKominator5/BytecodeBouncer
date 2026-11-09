@@ -1,0 +1,3 @@
+/trafficcop
+/internal/dataplane/trafficcop.bpf.o
+*.log
