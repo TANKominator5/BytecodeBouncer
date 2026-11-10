@@ -212,3 +212,13 @@ is closed, while normal map lifetime locking and post-close errors are preserved
 Unjail retries back off briefly on retirement contention instead of busy-spinning.
 The Log pending-barrier and fresh-barrier waits share one 700 ms timer, so retries
 remain bounded by a single budget; timer expiry does not poison future snapshots.
+
+## Integration after merging PR #5
+
+PR #6 was updated with main after PR #5 merged. Integrated telemetry supersedes
+the counter adapter and pending-log rejection from the foundation: logged
+policies remain supported and the event drain owns their lifecycle. The 1.5 s
+IPC response allowance is retained while command acceptance remains measured
+independently by existing one-second bench deadlines. Foundation metadata and
+two-limit regression tests remain, adapted to the integrated snapshot API and
+canonical mapped-IPv6 formatting. No C ABI changes in conflict resolution.

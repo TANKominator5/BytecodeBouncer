@@ -46,7 +46,9 @@ func CallRequest(request Request) (json.RawMessage, error) {
 		return nil, errors.New("trafficcop is not running")
 	}
 	defer c.Close()
-	timeout := 970 * time.Millisecond
+	// Allow successful work within the spec budget to return its response.
+	// Acceptance timing is still measured by the integration harness.
+	timeout := 1500 * time.Millisecond
 	if command == "stop" {
 		timeout = 4 * time.Second
 	}

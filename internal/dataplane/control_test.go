@@ -271,3 +271,23 @@ func TestKernelProductionTargetedSnapshots(t *testing.T) {
 		t.Fatal("health read after close")
 	}
 }
+
+func TestKernelProductionMultipleLimits(t *testing.T) {
+	p := productionPlane(t, "limit 1/s burst 1 proto udp dport 10\nlimit 1/s burst 1 proto udp dport 11\n")
+	// The same source gets an independent bucket in each rule's inner map.
+	for _, port := range []uint16{10, 11} {
+		packet := ipv4("192.0.2.7", 17, 0, 5, udp(port))
+		runPacket(t, p.collection, packet, pass)
+		runPacket(t, p.collection, packet, drop)
+		runPacket(t, p.collection, ipv4("192.0.2.8", 17, 0, 5, udp(port)), pass)
+	}
+	state, err := p.ReadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range state.Rules {
+		if rule.Counters.Hits != 3 || rule.Counters.Passed != 2 || rule.Counters.Dropped != 1 {
+			t.Fatalf("rule %+v", rule)
+		}
+	}
+}

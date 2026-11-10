@@ -26,7 +26,7 @@ echo 'EXPECTED FAILURE: nonexistent interface (the following error is intentiona
 if run ./trafficcop start nonexistent0 tests/fixtures/bootstrap.rules; then echo 'unexpected attachment success' >&2; exit 1; fi
 [[ ! -S /run/trafficcop/control.sock ]]
 SECONDS=0
-run ./trafficcop start eth0 tests/fixtures/bootstrap.rules
+run ./trafficcop start eth0 tests/fixtures/metadata.rules
 started=1
 (( SECONDS < 5 ))
 run python3 - <<'PY'
@@ -35,6 +35,8 @@ binary='./trafficcop'
 def call(*args): return subprocess.run([binary,*args],capture_output=True,text=True,timeout=1)
 assert call('start','eth0','tests/fixtures/bootstrap.rules').returncode==1
 before=json.loads(call('stats').stdout)
+assert [r['line'] for r in before['rules']]==[3],before
+assert before['sets']==[{'name':'a','prefixes':0},{'name':'z','prefixes':1}],before
 # Broadcast ARP-shaped Ethernet frames bypass filtering and count as other.
 s=socket.socket(socket.AF_PACKET,socket.SOCK_RAW);s.bind(('players',0))
 frame=b'\xff'*6+b'\x02\x00\x00\x00\x00\x02'+b'\x08\x06'+b'\x00'*46
@@ -50,7 +52,12 @@ assert web['passed']>=after['passed']
 with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'BYTECODE' in r.read()
 assert call('reload','/nonexistent/trafficcop.rules').returncode==1
 assert call('reload','tests/fixtures/bootstrap.rules').returncode==0
-version=json.loads(call('stats').stdout)['rules_version']
+reloaded=json.loads(call('stats').stdout)
+assert reloaded['rules_version']==before['rules_version']+1,reloaded
+assert reloaded['rules']==[] and reloaded['sets']==[],reloaded
+with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: web=json.load(r)
+assert web['rules_version']==reloaded['rules_version'] and web['rules']==reloaded['rules']
+version=reloaded['rules_version']
 with tempfile.TemporaryDirectory() as directory:
     fifo=os.path.join(directory,'rules.fifo');os.mkfifo(fifo)
     for path in (fifo,'/dev/zero','/dev/tty'):
