@@ -35,7 +35,8 @@ sudo tests/integration/bootstrap.sh
 
 The integration test creates its own namespace and veth pair and always attempts
 cleanup. It checks readiness/time limits, native XDP attachment, packet counters,
-stats HTTP schema, singleton handling, unsupported commands, detach and restart.
+stats HTTP schema, singleton handling, failed/successful reload, rejected policy
+inputs, detach and restart.
 Never attach this scaffold to a production interface.
 
 For a persistent demo, the setup script creates its own namespace and veth pair:
@@ -70,7 +71,9 @@ explicitly fail until C's telemetry provider is wired. Runtime policies with `lo
 are rejected rather than losing events without a consumer; `ParseReader` retains
 the complete grammar for kernel tests. CLI and HTTP stats use the active generation,
 rule/set records, active jail count and top five full-address source totals.
-Policy files must be regular files (or `/dev/null`) and at most 16 MiB; FIFOs and
+Top sources include both IPv4 and IPv6, following the later IPv6 extension of
+the specification; ties use numeric order, IPv4 first. Policy files must be regular
+files (or `/dev/null`) and at most 16 MiB; FIFOs and
 other devices are rejected before reading. See [control-plane handoff](docs/control-plane.md).
 The kernel now parses Ethernet/VLAN/IPv4/options/fragments/IPv6 extensions and
 classifies malformed frames correctly. With bootstrap configuration, valid IP

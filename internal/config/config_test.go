@@ -133,7 +133,7 @@ func TestRuntimePolicyFiles(t *testing.T) {
 	if err := unix.Mkfifo(fifo, 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{fifo, "/dev/zero", dir} {
+	for _, path := range []string{fifo, "/dev/zero", "/dev/tty", dir} {
 		if _, err := Parse(path, false); err == nil {
 			t.Fatalf("accepted special file %s", path)
 		}

@@ -39,6 +39,15 @@ func TestStateSnapshot(t *testing.T) {
 	if !reflect.DeepEqual(got.TopSources, want) {
 		t.Fatalf("ranking %+v", got.TopSources)
 	}
+	// Map iteration order varies; the best source may arrive after five rows.
+	for shift := 1; shift < len(state.Sources); shift++ {
+		reordered := state
+		reordered.Sources = append(append([]contract.SourceCount{}, state.Sources[shift:]...), state.Sources[:shift]...)
+		ranked, err := StateSnapshot(stateReader{state: reordered})
+		if err != nil || !reflect.DeepEqual(ranked.TopSources, want) {
+			t.Fatalf("rotation %d: %+v %v", shift, ranked.TopSources, err)
+		}
+	}
 	if got.Sets[0].Name != "a" || state.Sets[0].Name != "z" {
 		t.Fatal("set ordering mutated input")
 	}

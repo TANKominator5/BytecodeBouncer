@@ -41,7 +41,9 @@ func StateSnapshot(reader contract.StateReader) (Stats, error) {
 		address netip.Addr
 		packets uint64
 	}
-	sources := make([]source, 0, len(state.Sources))
+	// Keep only five candidates: O(n) time and constant extra storage even
+	// when the source map is full. ReadState still materializes the map snapshot.
+	sources := make([]source, 0, 5)
 	for _, entry := range state.Sources {
 		var address netip.Addr
 		switch entry.Src.Family {
@@ -52,16 +54,23 @@ func StateSnapshot(reader contract.StateReader) (Stats, error) {
 		default:
 			return Stats{}, fmt.Errorf("invalid source address family %d", entry.Src.Family)
 		}
-		sources = append(sources, source{address, entry.Packets})
-	}
-	sort.Slice(sources, func(i, j int) bool {
-		if sources[i].packets != sources[j].packets {
-			return sources[i].packets > sources[j].packets
+
+		position := 0
+		for position < len(sources) {
+			candidate := sources[position]
+			if entry.Packets > candidate.packets || (entry.Packets == candidate.packets && address.Compare(candidate.address) < 0) {
+				break
+			}
+			position++
 		}
-		return sources[i].address.Compare(sources[j].address) < 0
-	})
-	if len(sources) > 5 {
-		sources = sources[:5]
+		if position == 5 {
+			continue
+		}
+		if len(sources) < 5 {
+			sources = append(sources, source{})
+		}
+		copy(sources[position+1:], sources[position:len(sources)-1])
+		sources[position] = source{address, entry.Packets}
 	}
 	for _, entry := range sources {
 		result.TopSources = append(result.TopSources, contract.SourceStats{Src: entry.address.String(), Packets: entry.packets})

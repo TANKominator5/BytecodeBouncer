@@ -20,9 +20,11 @@ kernel items do not imply CLI integration or Linux 6.8 acceptance; see
 - [x] Bounce MAC-only mutation and unchanged honeypot redirect (private veth wire checks).
 - [ ] Exact per-rule/global counters, exact source ranking and numeric ordering.
   - [x] Exact kernel counters/source totals on four CPUs; userspace ranking has focused tests and CLI/HTTP smoke coverage.
+    Ranking includes IPv4 and IPv6 under the later IPv6 extension of the spec.
 - [ ] Atomic reload, safe old-object lifetime, persistence, fresh rule counters.
   - [x] Attached program replacement with shared persistent maps under traffic;
-    CLI reload and long-run/timing validation remain open.
+    CLI failed/successful reload and generation metadata pass namespace smoke tests;
+    long-run/timing validation remains open.
 - [ ] Event ABI, no loss at 20k/s, last 1000 history and log command.
   - [x] Fixed event ABI and lossless 20,000-decision kernel burst; continuous
     daemon draining/history remains open.

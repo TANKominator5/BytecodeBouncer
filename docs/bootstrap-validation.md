@@ -8,7 +8,7 @@ Executed successfully during bootstrap:
 - `make test`: Go race-enabled unit/ABI/HTTP tests and go vet.
 - `sudo tests/integration/bootstrap.sh`: real native XDP attachment to isolated
   veth, raw-frame pass counters, singleton rejection, failed attachment cleanup,
-  HTTP/page responses, unsupported reload preservation, detach, stopped commands,
+  HTTP/page responses, detach, stopped commands,
   port/socket release and restart; start/stop each under five seconds.
 - `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/trafficcop-amd64 ./cmd/trafficcop`:
   target architecture cross-build. This does not prove target runtime behavior.
@@ -19,7 +19,7 @@ like Go's listening socket, and separately checks actual detach and restart.
 
 Not established locally: a fresh Ubuntu 24.04 installation, x86-64/Linux 6.8
 runtime, four-CPU stress, hidden-harness compatibility, full grammar/filtering,
-reload, lossless logging, bounce or honeypot redirect. GitHub Actions is configured
+sustained reload stress, lossless logging, bounce or honeypot redirect. GitHub Actions is configured
 to run the bootstrap on Ubuntu 24.04; inspect its result rather than assuming it
 passed. No full-firewall performance or completion claim is made.
 
@@ -38,3 +38,13 @@ native trafficcop XDP attachment and an HTTP listener only inside its namespace.
 After `sudo ./demo.sh stop`, the specific daemon PID and BPF program ID were gone,
 the namespace/demo state/control socket were absent, host port 8088 could be
 bound, stats correctly failed as stopped, and a second stop succeeded harmlessly.
+
+## Control-plane review regression checks (11 November 2026)
+
+The updated namespace smoke test exercises failed/successful CLI reload,
+generation increments, rejection of FIFO/device/logged policies without changing
+the generation, rule/set metadata and HTTP/CLI snapshot agreement. Live mixed-family
+set edits and atomic unjail are exercised through the production map APIs by
+TestKernelProductionControl. TestKernelProductionMultipleLimits exercises two
+independent per-source inner maps through the production loader. These do not
+establish worst-capacity command timing or target Linux 6.8 acceptance.

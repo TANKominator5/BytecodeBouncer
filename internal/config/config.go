@@ -30,15 +30,15 @@ func Validate(path string) error { _, err := Parse(path, false); return err }
 // Parse loads a runtime policy. ParseReader separately exposes the full kernel
 // grammar; logged policies cannot run until the daemon owns an event consumer.
 func Parse(path string, honeypot bool) (*Policy, error) {
-	// Nonblocking open lets us reject FIFOs before waiting for a writer. Inspect
-	// the opened descriptor, not the path, so a symlink swap cannot bypass this.
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	// O_PATH inspects the inode without invoking device open handlers. Reopen
+	// the validated descriptor through procfs so path swaps cannot bypass this.
+	fd, err := unix.Open(path, unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), path)
-	defer f.Close()
-	info, err := f.Stat()
+	handle := os.NewFile(uintptr(fd), path)
+	defer handle.Close()
+	info, err := handle.Stat()
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +46,11 @@ func Parse(path string, honeypot bool) (*Policy, error) {
 	if !info.Mode().IsRegular() && (err != nil || !os.SameFile(info, null)) {
 		return nil, fmt.Errorf("rules file must be a regular file or /dev/null")
 	}
+	f, err := os.OpenFile(fmt.Sprintf("/proc/self/fd/%d", fd), os.O_RDONLY|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
 	// Bound total work even when a regular file is being appended concurrently.
 	const maxBytes = 16 << 20
 	input := &io.LimitedReader{R: f, N: maxBytes + 1}

@@ -59,8 +59,9 @@ the complete observability provider remain integration checks, not presumed pass
 
 ## Review fixes
 
-Runtime policy loading opens nonblocking and checks the opened descriptor before
-reading, accepting regular files and `/dev/null` only. Total input is capped at
+Runtime policy loading inspects with O_PATH before opening for reading, accepting
+regular files and `/dev/null` only. It reopens the validated descriptor through
+procfs, so symlink swaps cannot bypass the type check. Total input is capped at
 16 MiB, including comments, to bound work for concurrently growing files. FIFO,
 device, oversized and logged-policy failures leave the active generation intact.
 The complete grammar remains available through ParseReader for kernel tests.
@@ -69,3 +70,8 @@ The stats fix crosses into C's observe ownership and extends the namespace smoke
 test. It uses the existing shared StateReader and JSON types with no ABI change.
 Focused tests cover generation metadata, rule counters, alphabetical sets,
 full IPv4/IPv6 numeric source ordering, active jail expiry and detached snapshots.
+
+Top-five aggregation keeps five candidates instead of sorting/copying every
+source. ReadState still reads all source/jail records; worst-capacity latency
+must be measured. CLI response deadlines allow 1.5 seconds to receive completion;
+this does not relax the specification's independently measured one-second budget.
