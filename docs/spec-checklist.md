@@ -9,7 +9,8 @@ kernel items do not imply CLI integration or Linux 6.8 acceptance; see
 - [x] Singleton lock, private CLI socket, failed-start resource cleanup.
 - [x] Per-CPU packet counters, shared stats JSON and live dashboard scaffold.
 - [x] Reject unsupported config/commands instead of silently pretending support.
-- [ ] Complete strict rules grammar, forward sets, normalized prefixes, limits.
+  Runtime logging policies are rejected until continuous event draining is wired.
+- [x] Complete strict rules grammar, forward sets, normalized prefixes, limits.
 - [x] Ethernet/VLAN/IPv4/options/fragments/malformed and complete IPv6 parsing.
 - [x] Kernel first-match engine, all matches, fragment/default semantics, line numbers.
 - [x] Independent per-rule/per-source token buckets and capacity tests (WSL kernel).
@@ -18,10 +19,12 @@ kernel items do not imply CLI integration or Linux 6.8 acceptance; see
   - [x] Kernel jail/expiration/locked release and exact fixed-window detector.
 - [x] Bounce MAC-only mutation and unchanged honeypot redirect (private veth wire checks).
 - [ ] Exact per-rule/global counters, exact source ranking and numeric ordering.
-  - [x] Exact kernel counters/source totals on four CPUs; ranking remains userspace work.
+  - [x] Exact kernel counters/source totals on four CPUs; userspace ranking has focused tests and CLI/HTTP smoke coverage.
+    Ranking includes IPv4 and IPv6 under the later IPv6 extension of the spec.
 - [ ] Atomic reload, safe old-object lifetime, persistence, fresh rule counters.
   - [x] Attached program replacement with shared persistent maps under traffic;
-    CLI reload and long-run/timing validation remain open.
+    CLI failed/successful reload and generation metadata pass namespace smoke tests;
+    long-run/timing validation remains open.
 - [ ] Event ABI, no loss at 20k/s, last 1000 history and log command.
   - [x] Fixed event ABI and lossless 20,000-decision kernel burst; continuous
     daemon draining/history remains open.

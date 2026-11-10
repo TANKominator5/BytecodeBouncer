@@ -1,2 +1,2 @@
-# Bootstrap intentionally supports only pass-through.
+# Minimal pass-through policy used by lifecycle smoke tests.
 default pass

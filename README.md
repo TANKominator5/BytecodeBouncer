@@ -1,7 +1,7 @@
 # BytecodeBouncer / trafficcop
 
-Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. **Person A's kernel
-dataplane is implemented; the CLI still accepts only bootstrap configuration.**
+Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. **The kernel and
+control-plane foundation are implemented; full telemetry integration is pending.**
 This is not yet the complete, integrated firewall. Deadline: 13 November 2026,
 11:59 p.m. IST.
 
@@ -35,7 +35,8 @@ sudo tests/integration/bootstrap.sh
 
 The integration test creates its own namespace and veth pair and always attempts
 cleanup. It checks readiness/time limits, native XDP attachment, packet counters,
-stats HTTP schema, singleton handling, unsupported commands, detach and restart.
+stats HTTP schema, singleton handling, failed/successful reload, rejected policy
+inputs, detach and restart.
 Never attach this scaffold to a production interface.
 
 For a persistent demo, the setup script creates its own namespace and veth pair:
@@ -64,14 +65,20 @@ namespace/socket ownership is checked before cleanup. Failed startup rolls back
 resources it created. Build and demo setup remain separate; `trafficcop start`
 still operates on an existing interface as the grading harness requires.
 
-Only blank lines, comments and one optional `default pass` are accepted. `reload`,
-`set`, `jail`, `unjail`, `log`, filtering and the honeypot argument are explicitly
-unsupported. Counters for unfinished features are zero and record arrays empty.
+The complete kernel rules grammar, policy enforcement, optional honeypot argument,
+atomic reload, live `set add|del` and `unjail` are implemented. `jail`/`log` still
+explicitly fail until C's telemetry provider is wired. Runtime policies with `log`
+are rejected rather than losing events without a consumer; `ParseReader` retains
+the complete grammar for kernel tests. CLI and HTTP stats use the active generation,
+rule/set records, active jail count and top five full-address source totals.
+Top sources include both IPv4 and IPv6, following the later IPv6 extension of
+the specification; ties use numeric order, IPv4 first. Policy files must be regular
+files (or `/dev/null`) and at most 16 MiB; FIFOs and
+other devices are rejected before reading. See [control-plane handoff](docs/control-plane.md).
 The kernel now parses Ethernet/VLAN/IPv4/options/fragments/IPv6 extensions and
 classifies malformed frames correctly. With bootstrap configuration, valid IP
-passes except unmatched non-first fragments, which drop. Policy-rule loading
-and live commands still need Person B's integration; stats panels/event history
-need Person C's integration. Do not assume the CLI enables those features yet.
+passes except unmatched non-first fragments, which drop. Dashboard panels and event
+history still need Person C's integration. Do not assume those features are ready.
 
 ### Person A dataplane tests and handoff
 
