@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 tmp=$(mktemp -d)
 trap 'rm -f "$tmp/parser"; rmdir "$tmp"' EXIT
-clang -O2 -g -Wall -Werror -fsanitize=address,undefined -Iinclude -Ibpf bpf/tests/parser.c -o "$tmp/parser"
+"${CLANG:-/usr/bin/clang}" -O2 -g -Wall -Werror -fsanitize=address,undefined -Iinclude -Ibpf bpf/tests/parser.c -o "$tmp/parser"
 "$tmp/parser"
 if [[ ${1:-} == --kernel ]]; then
     [[ $EUID == 0 ]] || { echo 'kernel tests require root' >&2; exit 1; }

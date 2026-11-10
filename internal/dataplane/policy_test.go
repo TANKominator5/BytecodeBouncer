@@ -68,12 +68,13 @@ type testSetKey struct {
 type testRuleCounters struct{ Hits, Passed, Dropped, Bounced, Honeypotted uint64 }
 type testHealth struct{ SourceFull, JailFull, ScanFull, BucketFailed, EventLost, ConfigMissing uint64 }
 type testJail struct {
-	Lock, Reserved uint32
-	UntilNS        uint64
+	Lock, Retired uint32
+	UntilNS       uint64
 }
 type testBucket struct{ NextNS uint64 }
 type testScan struct {
 	Lock, Count         uint32
+	Retired, Reserved   uint32
 	Generation, StartNS uint64
 	Ports               [1024]uint64
 }
@@ -176,11 +177,20 @@ func requireBPF(t *testing.T) {
 	}
 }
 func loadPolicy(t *testing.T, config testConfig, shared map[string]*ebpf.Map) *ebpf.Collection {
+	return loadPolicySized(t, config, shared, 0)
+}
+
+// Small capacities exercise saturation without allocating hundreds of MiB.
+func loadPolicySized(t *testing.T, config testConfig, shared map[string]*ebpf.Map, capacity uint32) *ebpf.Collection {
 	t.Helper()
 	requireBPF(t)
 	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(object))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if capacity != 0 {
+		spec.Maps["scans"].MaxEntries = capacity
+		spec.Maps["jail"].MaxEntries = capacity
 	}
 	spec.Maps["config"].Contents = []ebpf.MapKV{{Key: uint32(0), Value: config}}
 	c, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: shared, Programs: ebpf.ProgramOptions{LogLevel: ebpf.LogLevelStats}})
@@ -976,7 +986,7 @@ func TestKernelWireAndReplacement(t *testing.T) {
 		}
 	}
 	shared := map[string]*ebpf.Map{}
-	for _, name := range []string{"counters", "health", "sources", "jail", "events"} {
+	for _, name := range []string{"counters", "health", "sources", "jail", "events", "maintenance"} {
 		shared[name] = c.Maps[name]
 	}
 	jailKey := addr("10.99.0.1")
@@ -1157,4 +1167,108 @@ func TestKernelBucketCapacity(t *testing.T) {
 	}
 	healthy(t, c)
 	t.Logf("64 independent limit maps loaded; two retain 65536 sources each; kernel fdinfo memlock sum=%d bytes (includes first-rule template, excludes other maps)", allocation)
+}
+
+func TestKernelExpiredStateReclamation(t *testing.T) {
+	t.Run("scan-churn-preserves-active", func(t *testing.T) {
+		conf := cfg(testRule{Action: pass})
+		conf.ScanPorts = 3
+		conf.ScanWindowSeconds = 60
+		conf.ScanJailSeconds = 60
+		c := loadPolicySized(t, conf, nil, 4)
+		active := addr("192.0.2.1")
+		state := testScan{Generation: 1, StartNS: monotonicNS(t), Count: 1}
+		state.Ports[0] = 1 << 7
+		if err := c.Maps["scans"].Put(active, state); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 3; i++ {
+			expired := testScan{Generation: 1, StartNS: monotonicNS(t) - 61_000_000_000}
+			if err := c.Maps["scans"].Put(addr(fmt.Sprintf("198.51.100.%d", i+1)), expired); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := 1; i <= 12; i++ {
+			source := fmt.Sprintf("203.0.113.%d", i)
+			for _, port := range []uint16{10, 11, 12} {
+				verdict := uint32(pass)
+				if port == 12 {
+					verdict = drop
+				}
+				runPacket(t, c, ipv4(source, 17, 0, 5, udp(port)), verdict)
+			}
+			// Model expiry while keeping the map full; the next identity must reclaim.
+			var scan testScan
+			if err := c.Maps["scans"].LookupWithFlags(addr(source), &scan, ebpf.LookupLock); err != nil {
+				t.Fatal(err)
+			}
+			scan.StartNS = monotonicNS(t) - 61_000_000_000
+			if err := c.Maps["scans"].Update(addr(source), scan, ebpf.UpdateLock); err != nil {
+				t.Fatal(err)
+			}
+			var jail testJail
+			if err := c.Maps["jail"].LookupWithFlags(addr(source), &jail, ebpf.LookupLock); err != nil {
+				t.Fatal(err)
+			}
+			jail.UntilNS = 0
+			if err := c.Maps["jail"].Update(addr(source), jail, ebpf.UpdateLock); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var kept testScan
+		if err := c.Maps["scans"].LookupWithFlags(active, &kept, ebpf.LookupLock); err != nil {
+			t.Fatal(err)
+		}
+		if kept.Count != 1 || kept.Ports[0] != (1<<7) || kept.Retired != 0 {
+			t.Fatalf("active scan changed: %+v", kept)
+		}
+		healthy(t, c)
+	})
+	t.Run("jail-churn-preserves-active", func(t *testing.T) {
+		c := loadPolicySized(t, cfg(testRule{Action: jailAction, JailSeconds: 60, Matches: 32, DportMin: 9, DportMax: 9}), nil, 4)
+		active := addr("192.0.2.1")
+		keep := testJail{UntilNS: monotonicNS(t) + 60_000_000_000}
+		if err := c.Maps["jail"].Put(active, keep); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 3; i++ {
+			if err := c.Maps["jail"].Put(addr(fmt.Sprintf("198.51.100.%d", i+1)), testJail{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := 1; i <= 12; i++ {
+			source := fmt.Sprintf("203.0.113.%d", i)
+			runPacket(t, c, ipv4(source, 17, 0, 5, udp(9)), drop)
+			runPacket(t, c, ipv4(source, 17, 0, 5, udp(10)), drop)
+			var jail testJail
+			if err := c.Maps["jail"].LookupWithFlags(addr(source), &jail, ebpf.LookupLock); err != nil {
+				t.Fatal(err)
+			}
+			jail.UntilNS = 0
+			if err := c.Maps["jail"].Update(addr(source), jail, ebpf.UpdateLock); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var kept testJail
+		if err := c.Maps["jail"].LookupWithFlags(active, &kept, ebpf.LookupLock); err != nil {
+			t.Fatal(err)
+		}
+		if kept.UntilNS != keep.UntilNS || kept.Retired != 0 {
+			t.Fatalf("active jail changed: %+v", kept)
+		}
+		healthy(t, c)
+	})
+	t.Run("full-active-scan-fails-closed", func(t *testing.T) {
+		conf := cfg()
+		conf.ScanPorts = 2
+		conf.ScanWindowSeconds = 60
+		conf.ScanJailSeconds = 60
+		c := loadPolicySized(t, conf, nil, 1)
+		runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(1)), pass)
+		runPacket(t, c, ipv4("192.0.2.2", 17, 0, 5, udp(1)), drop)
+		if totals(t, c).Jailed != 0 {
+			t.Fatal("capacity failure counted as jail")
+		}
+		runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(2)), drop)
+	})
 }

@@ -46,7 +46,7 @@ logging use a common verdict-finalization path so each packet is counted once.
 `include/contract.h` is authoritative for native-endian map fields and
 network-order address bytes. Reserved bytes must be zero. Use fixed-width types,
 explicit padding, C static assertions and Go ELF/layout tests. Rule indices and
-original file line numbers are separate concepts. ABI v2 and its integration
+original file line numbers are separate concepts. ABI v3 and its integration
 protocol are documented in [docs/dataplane-abi.md](docs/dataplane-abi.md). The task
 owner authorized this shared change; B/C review remains required before merge.
 
@@ -100,3 +100,12 @@ if possible. Event saturation, source-count capacity and reload reclamation
 need explicit limits/tests. No model-proposed memory or throughput estimate is
 a measured result. The target remains Ubuntu 24.04, Linux 6.8, x86-64, 4 CPUs;
 ARM64-host testing does not replace that validation.
+
+## Expired-state recovery
+
+Jail and scan maps reclaim expired entries on insertion pressure. A shared
+maintenance map serializes collectors; locked retirement markers prevent a
+concurrent writer from reviving a value after deletion. Share maintenance with
+jail across program replacements. Active state is never evicted. Scan allocation
+failures drop the current packet with diagnostics instead of bypassing detection.
+See the ABI handoff for finite-capacity and pressure-path performance limits.

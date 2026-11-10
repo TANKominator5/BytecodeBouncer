@@ -17,6 +17,8 @@
 
 ARRAY_MAP(counters, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_counters);
 ARRAY_MAP(health, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_health);
+/* One collector per state map, shared with jail across program replacements. */
+ARRAY_MAP(maintenance, BPF_MAP_TYPE_ARRAY, 2, __u64);
 ARRAY_MAP(config, BPF_MAP_TYPE_ARRAY, 1, struct tc_config);
 ARRAY_MAP(rule_counters, BPF_MAP_TYPE_PERCPU_ARRAY, TC_MAX_RULES, struct tc_rule_counters);
 SOURCE_MAP(sources, TC_STATE_SOURCES, __u64);
@@ -89,9 +91,12 @@ SEC("xdp") int trafficcop(struct xdp_md *ctx)
         if (h) h->config_missing++;
         return finish(c, TC_DROP);
     }
-    if (packet.has_ports && cfg->scan_ports && scan_source(&packet, cfg, now, h)) {
-        if (c) c->jailed++;
-        return finish(c, TC_DROP);
+    if (packet.has_ports && cfg->scan_ports) {
+        int scan = scan_source(&packet, cfg, now, h);
+        if (scan) {
+            if (scan > 0 && c) c->jailed++;
+            return finish(c, TC_DROP);
+        }
     }
     struct match_context match = { .packet = &packet, .cfg = cfg, .index = -1 };
     bpf_loop(TC_MAX_RULES, match_rule, &match, 0);

@@ -1,4 +1,4 @@
-# Person A dataplane handoff (ABI v2)
+# Person A dataplane handoff (ABI v3)
 
 `include/contract.h` is the authoritative layout. Shared changes were authorized
 by the task owner; B/C review is still required before merge. A also adds kernel
@@ -29,12 +29,15 @@ Pass these persistent maps to `NewCollectionWithOptions` / `MapReplacements`:
 | --- | --- |
 | counters | cumulative per-CPU totals |
 | health | cumulative per-CPU diagnostic failures |
+| maintenance | serialized jail/scan reclamation; share whenever jail is shared |
 | sources | full-address cumulative atomic packet counts |
 | jail | full-address locked release times |
 | events | single ordered ring, one continuous consumer |
 
 Other maps (`config`, `rule_counters`, `sets`, `buckets`, `scans`) belong to one
 generation. Scan windows and buckets restart on reload; jail/history do not.
+ABI v3 reuses the jail value's former reserved word as `retired` and adds
+`retired,reserved` before the scan generation (scan size 8,224; bitmap offset 32).
 No userspace Go mirror is shipped as production code until B integrates it;
 the typed fixtures demonstrate encoding without unsafe casts.
 
@@ -73,8 +76,12 @@ active generation's trie; they must not reset counters or increment generation.
   Read/update with `BPF_F_LOCK` (`LookupWithFlags(..., LookupLock)` and
   `Update(..., UpdateLock)`). To unjail set `until_ns=0` on the existing entry,
   not delete: a kernel CPU may still hold its value pointer. Compare expiration
-  against `CLOCK_MONOTONIC`, round positive remaining seconds up. Expired entries
-  stay allocated/reusable. Online deletion/GC requires a separate safe protocol.
+  against `CLOCK_MONOTONIC`, round positive remaining seconds up. Expired entries are reclaimed on allocation pressure. A collector takes the
+  shared maintenance flag, marks an expired value retired under its spinlock,
+  then deletes it outside the lock. Writers retry retired jail pointers rather
+  than extending orphaned values. Preserve the retired field on userspace updates;
+  retry retired records instead of reviving them. Do not independently delete
+  entries or reset maintenance flags.
 - `sources`: non-LRU HASH, counts every valid IP packet reaching step 6, including
   packets dropped by jail/scan. A single atomic counter includes all CPUs. Sort
   snapshots by count descending then full numeric address (v4 before v6).
@@ -84,16 +91,16 @@ active generation's trie; they must not reset counters or increment generation.
 
 Source/jail maps have 1,048,576 entries each, scans 65,536. Hash values are allocated
 on demand (`BPF_F_NO_PREALLOC`); slots are not silently evicted. These are finite
-capacities, not unlimited guarantees. Expired jail/source/scan identities consume
-slots until stop (scan map also resets on reload). Exact source ranking is only
+capacities, not unlimited guarantees. Cumulative source identities consume slots until stop. Expired jail/scan
+entries are reclaimed on allocation pressure (scan maps also reset on reload). Exact source ranking is only
 guaranteed while identities fit. Report memory measurements separately from
 logical payload: full scan values are about 514 MiB, plus kernel overhead.
 Each allocated limit LRU also costs kernel memory even when empty. Loading all 64
 limit rules must be tested on the target before declaring capacity acceptance.
 
 Allocation failures increment the relevant `health` field. A missing/failed
-bucket drops its matching frame. A full source map loses source accounting; full
-jail/scan maps cannot enforce new source state. **Those conditions are failures,
+bucket drops its matching frame. A full source map loses source accounting; a jail map full of active entries cannot enforce new jail state; a scan map
+with no reclaimable entry drops the current packet without incrementing jailed. **Those conditions are failures,
 not spec-compliant success**: B/C should surface them prominently (and start must
 fail if required map allocation fails). Packet decisions still remain in XDP.
 
@@ -129,3 +136,16 @@ program five times during traffic. It always attempts namespace cleanup and
 refuses to attach in PID 1's network namespace. Linux 6.8 target, long-run reload
 timings/reclamation and daemon event throughput still require measured evidence.
 See [validation](dataplane-validation.md).
+
+## Reclamation tradeoffs
+
+Reclamation runs only when insertion fails and stops after one expired entry.
+Active release times/windows are checked under their value lock, so historical
+sources no longer permanently poison a full map. A serial collector plus a
+retirement marker protects stale RCU readers from reviving a deleted value.
+A contending collector may temporarily prevent an insertion; scan allocation or
+retirement failure is a diagnostic DROP, not a bypass or a jailed counter hit.
+The bounded jail writer retries four times and reports jail_full on exhaustion.
+Fully active capacity exhaustion remains a resource failure, not a claim of
+unlimited state. Scanning a full active map can be costly; measure worst-case
+pressure on the target, and do not claim a packet-rate bound for this path.

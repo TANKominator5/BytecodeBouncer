@@ -96,7 +96,7 @@ and resource-exhaustion recovery have not been measured.
 
 ## Still required before Issue #1 acceptance / final submission
 
-- B/C integration and review of ABI v2, production map publication, strict config
+- B/C integration and review of ABI v3, production map publication, strict config
   validation, CLI operations, continuous event draining/history and snapshots.
 - Ubuntu 24.04 **Linux 6.8** verification/runtime, sustained flood speed, a
   long-running repeated reload/reclamation test on all CPUs and worst-case
@@ -104,9 +104,22 @@ and resource-exhaustion recovery have not been measured.
 - Continuous daemon 20k/s logging with exactly the newest 1,000 events, including
   reloads; source ranking/JSON formatting is still C's work.
 - Explicit handling/reporting of finite map capacity and event-ring saturation.
-  Expired jail/source identities are not garbage-collected online. The bootstrap
+  Expired jail/scan entries now have on-pressure reclamation; cumulative source
+  identities are not garbage-collected online. The bootstrap
   stats schema does not expose `health` yet; B/C must not hide these diagnostics.
 - Hidden-harness testing, full-capacity source/jail/scan memory measurements and
   complete dashboard/README screenshot remain unverified.
 
 No production CLI filtering/reload or complete-firewall acceptance is claimed.
+
+## PR review correction — expired-state saturation
+
+On the ARM64 Linux 7.0 host, real BPF test-run regression checks passed with
+four-entry jail/scan maps and more than twelve historical sources. Expired entries
+were reclaimed, new scan sources still reached jail thresholds, and active state
+was preserved. A full active scan map dropped the new source without miscounting
+it as jailed. ABI v3 adds retirement markers and a maintenance map that must be
+shared with persistent jail state on reload. Native parser tests use the system
+Clang by default (override CLANG explicitly), avoiding an unrelated Android NDK
+clang earlier in PATH. CI now runs the opt-in kernel suite as root rather than
+silently skipping its policy tests. Linux 6.8 runtime acceptance remains open.
