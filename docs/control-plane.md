@@ -1,11 +1,12 @@
 # Issue B control-plane foundation
 
-This branch implements strict rules parsing, production generation construction,
-atomic link publication, live set mutations and ABI v5 atomic unjail. It does not
-claim Issue B acceptance before C's telemetry provider is integrated: the old
-counter-only stats adapter remains, jail/log explicitly fail, and no consumer
-drains logged events yet. Use the observability integration branch for the full
-daemon. One-second worst-case reload and Linux 6.8 checks remain required.
+`feat/control-plane` provides the strict parser, production generations,
+atomic publication, live sets and ABI v5 atomic unjail as an independent foundation
+commit. `feat/observability-bench` integrates that dependency plus C's complete
+snapshots/history and all CLI verbs. The integration branch also parallelizes
+private limit-map allocation and removes an arbitrary parser line-length cap.
+See [integration validation](integration-validation.md) for measured end-to-end
+checks. Worst-case Linux 6.8 acceptance is not claimed.
 
 ## Shared boundary coordination
 

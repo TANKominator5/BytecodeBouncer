@@ -45,10 +45,10 @@ case "$1" in
   ip -n "$ns" link set eth0 up
   ip -n "$ns" link set players up
   ip -n "$ns" link set lo up
-  run ./trafficcop start eth0 tests/fixtures/bootstrap.rules
+   run ./trafficcop start eth0 tests/fixtures/demo.rules
   started=1
   stat -Lc %i "$socket" > "$state/socket"
-  echo 'Demo started (pass-through only).'
+   echo 'Demo started with example firewall policy (tests/fixtures/demo.rules).'
   echo 'Stats: sudo ./demo.sh stats'
   echo 'Browser dashboard: sudo ./demo.sh dashboard, then open http://127.0.0.1:8088/'
   echo 'Stop and clean up: sudo ./demo.sh stop'

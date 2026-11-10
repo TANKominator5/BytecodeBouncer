@@ -1,4 +1,38 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trafficcop</title>
-<style>body{background:#171c24;color:#eee;font:18px system-ui;max-width:960px;margin:4rem auto;padding:1rem}h1{color:#ffaf45}pre{background:#242d39;padding:1.5rem;overflow:auto}.notice{border-left:4px solid #ffaf45;padding:1rem}#status{color:#b9d9bf}</style>
-<h1>Bytecode Bouncer</h1><p class="notice">Bootstrap · pass-through only. Filtering, reload, jail and event logging are not implemented yet.</p><p id="status" role="status">Connecting…</p><pre id="stats" aria-label="Live packet counters"></pre>
-<script>let previous;async function update(){try{const r=await fetch('/stats.json',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json(),now=performance.now();let rate='';if(previous){const seconds=(now-previous.time)/1000;rate=` · ${((s.passed-previous.passed)/seconds).toFixed(0)} passed/s · ${((s.dropped-previous.dropped)/seconds).toFixed(0)} dropped/s`;}document.getElementById('stats').textContent=JSON.stringify(s,null,2);document.getElementById('status').textContent='Live'+rate;previous={time:now,passed:s.passed,dropped:s.dropped};}catch(e){document.getElementById('status').textContent='Connection unavailable: '+e.message;}setTimeout(update,1000);}update();</script></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Bytecode Bouncer · Trafficcop</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="bouncer" aria-hidden="true">▟▙<br>▜▛</div>
+    <div><p class="eyebrow">PIXEL ARCADE / NETWORK OPERATIONS</p><h1>BYTECODE <span>BOUNCER</span></h1><p class="subtitle">Keep the cheaters out. Keep the players in.</p></div>
+    <div class="connection"><span class="led" id="led" aria-hidden="true"></span><p id="status" role="status">Connecting…</p><small id="generation">Policy —</small></div>
+  </header>
+  <main>
+    <p id="warning" class="warning" role="alert" hidden></p>
+    <section class="scoreboard" aria-label="Traffic overview">
+      <article class="metric green"><h2>PASS / SEC</h2><strong id="pass-rate">—</strong><p><span id="passed">0</span> total passed</p></article>
+      <article class="metric red"><h2>DROP / SEC</h2><strong id="drop-rate">—</strong><p><span id="dropped">0</span> total dropped</p></article>
+      <article class="metric orange"><h2>BOUNCED</h2><strong id="bounced">0</strong><p>MAC swap · XDP_TX</p></article>
+      <article class="metric blue"><h2>HONEYPOTTED</h2><strong id="honeypotted">0</strong><p>Unchanged · XDP_REDIRECT</p></article>
+    </section>
+    <section class="panel" aria-labelledby="rules-heading">
+      <div class="panel-heading"><h2 id="rules-heading">01 / HOUSE RULES</h2><span>First match wins</span></div>
+      <div class="scroll"><table><caption class="sr-only">Current policy rule accounting</caption><thead><tr><th scope="col">LINE</th><th scope="col">HITS</th><th scope="col">PASS</th><th scope="col">DROP</th><th scope="col">BOUNCE</th><th scope="col">HONEYPOT</th></tr></thead><tbody id="rules"></tbody></table></div>
+    </section>
+    <div class="columns">
+      <section class="panel" aria-labelledby="sources-heading"><div class="panel-heading"><h2 id="sources-heading">02 / NOISIEST PLAYERS</h2><span>Top 5 sources</span></div><div class="scroll"><table><caption class="sr-only">Sources ranked by packet count</caption><thead><tr><th scope="col">SOURCE</th><th scope="col">PACKETS</th></tr></thead><tbody id="sources"></tbody></table></div></section>
+      <section class="panel" aria-labelledby="jail-heading"><div class="panel-heading"><h2 id="jail-heading">03 / TIMEOUT CORNER</h2><span id="jail-count">0 jailed</span></div><div class="scroll"><table><caption class="sr-only">Currently jailed sources</caption><thead><tr><th scope="col">SOURCE</th><th scope="col">SECONDS LEFT</th></tr></thead><tbody id="jail"></tbody></table></div></section>
+    </div>
+    <section class="panel" aria-labelledby="events-heading"><div class="panel-heading"><h2 id="events-heading">04 / DOOR LOG</h2><span>Latest 20 logged decisions</span></div><div class="scroll"><table><caption class="sr-only">Latest logged decisions, oldest first</caption><thead><tr><th scope="col">LINE</th><th scope="col">VERDICT</th><th scope="col">SOURCE</th><th scope="col">DESTINATION</th><th scope="col">PROTOCOL</th><th scope="col">SPORT</th><th scope="col">DPORT</th></tr></thead><tbody id="events"></tbody></table></div></section>
+    <section class="details" aria-label="Packet classification"><p>Malformed <strong id="malformed">0</strong></p><p>Other / non-IP <strong id="other">0</strong></p><p>Jail drops <strong id="jailed">0</strong></p><p>Default hits <strong id="default-hits">0</strong></p><p id="sets">Address sets: —</p></section>
+  </main>
+  <footer><span>TRAFFICCOP · EVERY VERDICT IN XDP</span><span>Auto-updates every second · <a href="/stats.json">stats.json</a> · <a href="/health.json">diagnostics</a></span></footer>
+</body>
+</html>

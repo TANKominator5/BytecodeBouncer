@@ -3,8 +3,8 @@
 ## Goal and scope
 Build the trafficcop firewall defined in [problem_Statement.md](problem_Statement.md).
 Read [architecture.md](architecture.md) and [docs/spec-checklist.md](docs/spec-checklist.md)
-before implementation. The CLI accepts bootstrap rules only; the kernel
-dataplane is broader, but this is not yet a completed integrated firewall.
+before implementation. The complete CLI/kernel/telemetry path is integrated;
+target-platform and worst-case acceptance gaps remain in the validation docs.
 Do not silently accept configuration that the dataplane does not enforce.
 
 ## Build simply

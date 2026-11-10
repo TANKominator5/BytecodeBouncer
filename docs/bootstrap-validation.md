@@ -1,5 +1,8 @@
 # Bootstrap validation
 
+Historical bootstrap evidence below. Current B/C integrated behavior and local
+measurements are in [integration-validation.md](integration-validation.md).
+
 Local environment: ARM64 Linux 7.0.0-1013-oracle, Go 1.26.8, system Clang 21.
 Target: Ubuntu 24.04, Linux 6.8, x86-64, four CPUs.
 

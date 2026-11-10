@@ -140,26 +140,46 @@ func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string
 		}
 	}()
 	var keys, fds []uint32
-	var inner []*ebpf.Map
+	for i, r := range cfg.Rules[:cfg.RuleCount] {
+		if r.Action == contract.Limit {
+			keys = append(keys, uint32(i))
+		}
+	}
+	inner := make([]*ebpf.Map, len(keys))
 	defer func() {
-		for _, m := range inner {
-			m.Close()
+		for i, m := range inner {
+			if i > 0 && m != nil {
+				m.Close()
+			}
 		}
 	}()
-	for i, r := range cfg.Rules[:cfg.RuleCount] {
-		if r.Action != contract.Limit {
-			continue
+	if len(keys) > 0 {
+		inner[0] = c.Maps["bucket_template"]
+		// Independent LRU maps are memory-heavy. Allocate private candidates on
+		// at most four workers, never parallelize mutation/publication itself.
+		jobs := make(chan int, len(keys))
+		for i := 1; i < len(keys); i++ {
+			jobs <- i
 		}
-		m := c.Maps["bucket_template"]
-		if len(keys) > 0 {
-			m, err = ebpf.NewMap(spec.Maps["buckets"].InnerMap)
-			if err != nil {
-				return nil, nil, err
+		close(jobs)
+		failures := make([]error, len(keys))
+		var workers sync.WaitGroup
+		for worker := 0; worker < 4; worker++ {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for i := range jobs {
+					inner[i], failures[i] = ebpf.NewMap(spec.Maps["buckets"].InnerMap.Copy())
+				}
+			}()
+		}
+		workers.Wait()
+		for i, m := range inner {
+			if failures[i] != nil {
+				return nil, nil, failures[i]
 			}
-			inner = append(inner, m)
+			fds = append(fds, uint32(m.FD()))
 		}
-		keys = append(keys, uint32(i))
-		fds = append(fds, uint32(m.FD()))
 	}
 	if len(keys) > 0 {
 		if _, err = c.Maps["buckets"].BatchUpdate(keys, fds, nil); err != nil {

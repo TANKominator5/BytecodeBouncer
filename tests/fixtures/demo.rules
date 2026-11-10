@@ -1,0 +1,10 @@
+# Isolated arcade demo — not a production policy recommendation.
+default pass
+fragments drop
+set cheaters 10.13.37.0/24 2001:db8:bad::/48
+drop src @cheaters log
+jail 120 proto udp dport 6000-6099 log
+limit 3/s burst 3 proto icmp icmp-type 8 log
+drop proto tcp dport 23 log
+limit 500/s burst 1000 proto udp dport 7777 log
+limit 3/s burst 3 proto icmp6 icmp-type 128 log

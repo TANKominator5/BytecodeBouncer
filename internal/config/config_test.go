@@ -123,3 +123,9 @@ func TestBinaryAddresses(t *testing.T) {
 		}
 	}
 }
+
+func TestLongValidComment(t *testing.T) {
+	if _, err := ParseReader(strings.NewReader("#"+strings.Repeat("x", 3<<20)+"\npass"), false); err != nil {
+		t.Fatal(err)
+	}
+}

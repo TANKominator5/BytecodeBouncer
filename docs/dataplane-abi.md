@@ -3,7 +3,8 @@
 `include/contract.h` is the authoritative layout. Shared changes were authorized
 by the task owner; B/C review is still required before merge. A also adds kernel
 fixtures in `internal/dataplane/policy_test.go` and the header dependency in
-`Makefile`. CLI/config/reload/dashboard implementation remains with B/C.
+`Makefile`. B/C now integrate the runtime in their respective ownership areas;
+see [integration evidence](integration-validation.md) for current behavior.
 
 ## Publication and lifetime (Person B)
 
@@ -38,14 +39,15 @@ Other maps (`config`, `rule_counters`, `sets`, `buckets`, `scans`) belong to one
 generation. Scan windows and buckets restart on reload; jail/history do not.
 ABI v5 reuses the jail value's former reserved word as `retired` and adds
 `retired,reserved` before the scan generation plus a pending jail deadline (scan size 8,232; bitmap offset 40).
-No userspace Go mirror is shipped as production code until B integrates it;
-the typed fixtures demonstrate encoding without unsafe casts.
+`internal/contract/contract.go` supplies the production Go mirror and typed
+snapshot/event interfaces. Production loaders and kernel fixtures share it;
+encoding does not use unsafe casts.
 
 The zero-initialized config preserves the bootstrap default PASS, fragments DROP
 with no rules. This is **not a configuration publication API**: never write an
 attached program's config map in place. Production B code must explicitly set
-defaults and generation (starting at 1). The bootstrap parser still rejects all
-unsupported rule syntax rather than silently accepting unenforced policy.
+defaults and generation (starting at 1). The production parser validates the
+whole file before a candidate is built and rejects unsupported/invalid syntax.
 
 ## Address sets
 

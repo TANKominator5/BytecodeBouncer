@@ -28,9 +28,9 @@ func productionPlane(t *testing.T, input string) *Plane {
 		t.Fatal(err)
 	}
 	p := &Plane{spec: spec, version: 1}
-	start:=time.Now()
+	start := time.Now()
 	p.collection, p.policy, err = p.prepare(policy, 1, nil)
-	t.Logf("production generation preparation: %s",time.Since(start))
+	t.Logf("production generation preparation: %s", time.Since(start))
 	if err != nil {
 		t.Fatalf("prepare: %+v", err)
 	}
@@ -120,4 +120,35 @@ func TestKernelProductionControl(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Close did not unblock reader")
 	}
+}
+
+func TestKernelProductionSnapshotCapacity(t *testing.T) {
+	p := productionPlane(t, "default pass\nset empty\n")
+	const count = 100000
+	keys := make([]contract.Address, count)
+	values := make([]uint64, count)
+	for i := range keys {
+		keys[i] = contract.Address{Family: 4, Bytes: [16]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}}
+		values[i] = uint64(i + 1)
+	}
+	if n, err := p.collection.Maps["sources"].BatchUpdate(keys, values, nil); err != nil || n != count {
+		t.Fatalf("source population %d: %v", n, err)
+	}
+	start := time.Now()
+	state, err := p.ReadState()
+	elapsed := time.Since(start)
+	if err != nil || len(state.Sources) != count {
+		t.Fatalf("snapshot %d: %v", len(state.Sources), err)
+	}
+	if elapsed >= 800*time.Millisecond {
+		t.Fatalf("100k-source snapshot too slow: %s", elapsed)
+	}
+	var sum uint64
+	for _, v := range state.Sources {
+		sum += v.Packets
+	}
+	if sum != uint64(count)*(count+1)/2 {
+		t.Fatal("inexact batch snapshot", sum)
+	}
+	t.Logf("detached exact %d-source snapshot in %s", count, elapsed)
 }

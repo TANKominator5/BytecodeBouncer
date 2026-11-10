@@ -13,7 +13,7 @@ host-wide singleton. The socket is mode 0600; an advisory lock serializes startu
 No maps need pinning while the daemon owns their descriptors. If future recovery
 requires pins, use only an owned subtree and clean it on every failure/stop.
 
-## Current implementation (control-plane foundation; telemetry integration pending)
+## Current implementation
 - The parser accepts the complete strict grammar, original line numbers, forward
   sets and normalized mixed-family prefixes. Start supports a honeypot interface.
 - A child daemon reports readiness only after HTTP/socket bind and native XDP
@@ -21,9 +21,12 @@ requires pins, use only an owned subtree and clean it on every failure/stop.
 - XDP implements parsing, first-match policy, sets, per-rule/source buckets,
   jail/scans, bounce/redirect, counters and event production. Start/reload publish
   complete policy generations; live set edits and atomic unjail operate on maps.
-- Stats/dashboard still use the old counter-only adapter. Jail/log snapshots,
-  full generation metadata and continuous event consumption require C's provider;
-  the jail/log commands explicitly report that pending integration on this branch.
+- All specified CLI verbs are integrated. Stats/jail/log commands and HTTP use
+  the same typed telemetry service. Snapshots include per-rule counters, sets,
+  exact top-five source ranking and currently active jail entries.
+- A dedicated event consumer retains the newest 1,000 decisions across reloads;
+  embedded dashboard assets poll all panels every second. Diagnostics live on a
+  separate endpoint, preserving the exact required stats JSON.
 - The binary embeds the built ELF. No Go bindings generator is required yet;
   an ELF-layout test checks the shared counter ABI without root.
 
@@ -55,8 +58,9 @@ freeze a complete candidate, reuse persistent maps, then update the existing XDP
 bpf_link program. Program/map references live through outstanding invocations;
 kernel RCU reclaims retired programs after descriptors close. This avoids both
 mutable/reusable config slots and an unbounded list of retained generations.
-The isolated wire test exercises five replacements under traffic, not the CLI
-reload or its one-second worst-case timing on Linux 6.8.
+Both kernel wire and public CLI tests exercise replacement under traffic. Local
+CLI stress checks include 12 adversarial reloads and a 64-limit-rule reload under
+one second; worst-case Linux 6.8 timing and long-run reclamation remain open.
 
 The production loader now creates a private BPF_F_RDONLY_PROG config map and
 freezes it before program verification, reuses persistent maps and builds fresh
@@ -64,6 +68,9 @@ sets, buckets, scan state and rule counters. Only a successful link update chang
 the active collection/version; failed candidates close their own resources.
 Mutation serialization and snapshot read locks protect collection/metadata
 lifetime. All source/jail map reads use batches; jail reads take BPF_F_LOCK.
+Private limit-map allocation uses at most four workers to meet the measured
+reload budget; each rule still owns a separate 65,536-entry LRU. The existing
+template serves the first rule. All preparation workers finish before publication.
 
 A complete candidate is parsed and validated before active state changes. A
 packet must select one complete immutable configuration, including rules and set
@@ -92,6 +99,18 @@ CLI share serialization and schema. Snapshot/cleanup must synchronize so maps
 are never closed while a request reads them. A dedicated event drain must never
 wait on dashboard clients. Measure 20,000 logged decisions/second and assert zero
 lost events; buffer-size estimates alone are not evidence.
+
+`StateReader` returns a detached generation-consistent native map snapshot under
+the plane's read lock. C formats full numeric IPv4-before-IPv6 ordering, canonical
+addresses, ceil jail seconds, and exact top five using a bounded candidate list.
+No stats serialization lock is held by event draining. History is copied (nullable
+port pointers included) before serialization, so clients cannot mutate it.
+Log snapshots serialize ring Flush barriers: the drain appends all queued records
+before acknowledging the barrier, avoiding sleep-based guesses or an empty read
+that hangs until another packet. Reader Close unblocks shutdown. End-to-end
+90,000-decision logging at ~25k/s with concurrent/slow HTTP clients is measured in
+`docs/integration-validation.md`. `/health.json` exposes events_read, ring loss,
+map allocation failures and terminal stream errors separately from stats.
 
 ## Integration and ownership
 A owns bpf/. B owns CLI/config/dataplane/daemon. C owns observe/web/integration
@@ -125,8 +144,8 @@ allocation contention and are retried even on repeated destination ports.
 
 `internal/contract/contract.go` mirrors the C ABI and owns typed public JSON.
 Dataplane counters and kernel-test fixtures use these production types, with
-ELF/BTF tests checking their layout. Observe consumes CounterReader rather than
+ELF/BTF tests checking their layout. Observe consumes StateReader rather than
 concrete dataplane.Plane. B supplies decoded EventReader records and map/control
-operations; C owns Telemetry snapshots/history. The daemon wires their lifecycle
-and invokes the same snapshot API for CLI and HTTP. Target interfaces are a
-handoff contract; they do not imply pending commands are implemented.
+operations; C implements Telemetry snapshots/history. The daemon wires their
+lifecycle and invokes the same snapshot API for CLI and HTTP. Shared Go snapshot
+and flush-barrier additions do not alter the ABI v5 kernel layouts.

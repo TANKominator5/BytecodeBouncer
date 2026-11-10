@@ -1,4 +1,4 @@
-name: Bootstrap checks
+name: Firewall checks
 on: [push, pull_request]
 permissions:
   contents: read
@@ -16,4 +16,6 @@ jobs:
       - run: make test
       - run: sudo tests/integration/bootstrap.sh
       - run: sudo tests/integration/demo.sh
+      - run: sudo bash tests/integration/firewall.sh
+      - run: sudo bash tests/integration/lifecycle.sh
       - run: sudo env "PATH=$PATH" bash bpf/test.sh --kernel
