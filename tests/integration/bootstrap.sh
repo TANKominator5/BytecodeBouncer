@@ -30,7 +30,7 @@ run ./trafficcop start eth0 tests/fixtures/bootstrap.rules
 started=1
 (( SECONDS < 5 ))
 run python3 - <<'PY'
-import json,socket,subprocess,time,urllib.request
+import json,os,socket,subprocess,tempfile,time,urllib.request
 binary='./trafficcop'
 def call(*args): return subprocess.run([binary,*args],capture_output=True,text=True,timeout=1)
 assert call('start','eth0','tests/fixtures/bootstrap.rules').returncode==1
@@ -50,7 +50,25 @@ assert web['passed']>=after['passed']
 with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'Bootstrap' in r.read()
 assert call('reload','/nonexistent/trafficcop.rules').returncode==1
 assert call('reload','tests/fixtures/bootstrap.rules').returncode==0
-assert call('stats').returncode==0
+reloaded=json.loads(call('stats').stdout)
+assert reloaded['rules_version']==before['rules_version']+1,reloaded
+# Rejected input must leave control responsive and the active generation intact.
+with tempfile.TemporaryDirectory() as directory:
+    fifo=os.path.join(directory,'rules.fifo');os.mkfifo(fifo)
+    logged=os.path.join(directory,'logged.rules')
+    with open(logged,'w') as f: f.write('pass log\n')
+    for path in (fifo,'/dev/zero',logged):
+        assert call('reload',path).returncode==1,path
+        assert json.loads(call('stats').stdout)['rules_version']==reloaded['rules_version']
+    policy=os.path.join(directory,'policy.rules')
+    with open(policy,'w') as f: f.write('set z 10.0.0.0/24\nset a\ndrop src 192.0.2.9\n')
+    assert call('reload',policy).returncode==0
+    changed=json.loads(call('stats').stdout)
+    assert changed['rules_version']==reloaded['rules_version']+1,changed
+    assert [r['line'] for r in changed['rules']]==[3],changed
+    assert changed['sets']==[{'name':'a','prefixes':0},{'name':'z','prefixes':1}],changed
+    with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: web=json.load(r)
+    assert web['rules_version']==changed['rules_version'] and web['rules']==changed['rules']
 print('PASS: real XDP counters, singleton, HTTP, failed/successful reload')
 PY
 SECONDS=0

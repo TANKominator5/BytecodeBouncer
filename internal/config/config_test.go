@@ -2,7 +2,10 @@ package config
 
 import (
 	"fmt"
+	"golang.org/x/sys/unix"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -121,5 +124,37 @@ func TestBinaryAddresses(t *testing.T) {
 		if key.Set != 3 || key.PrefixLen != 32+uint32(a.BitLen()) || key.Family != got.Family || key.Bytes != got.Bytes {
 			t.Fatalf("key %+v", key)
 		}
+	}
+}
+
+func TestRuntimePolicyFiles(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "fifo")
+	if err := unix.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{fifo, "/dev/zero", dir} {
+		if _, err := Parse(path, false); err == nil {
+			t.Fatalf("accepted special file %s", path)
+		}
+	}
+	if _, err := Parse("/dev/null", false); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "policy")
+	for _, input := range []string{"# comment\npass log", strings.Repeat("#\n", (16<<20)/2+1)} {
+		if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Parse(path, false); err == nil {
+			t.Fatal("accepted unsupported or oversized policy")
+		}
+	}
+	if err := os.WriteFile(path, []byte("default drop\npass src ::1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := Parse(path, false)
+	if err != nil || policy.Config.RuleCount != 1 {
+		t.Fatalf("regular policy: %v %+v", err, policy)
 	}
 }

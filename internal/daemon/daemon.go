@@ -127,7 +127,7 @@ func Run(iface, rules, honeypot string, ready *os.File) (runErr error) {
 		return plane.Close()
 	}
 	defer shutdown()
-	snapshot := func() (observe.Stats, error) { return observe.Snapshot(plane) }
+	snapshot := func() (observe.Stats, error) { return observe.StateSnapshot(plane) }
 	server := &http.Server{Handler: observe.Handler(snapshot), ReadHeaderTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second}
 	defer server.Close()
 	go func() {

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
+	"golang.org/x/sys/unix"
 )
 
 type Set struct {
@@ -25,13 +26,42 @@ type Policy struct {
 }
 
 func Validate(path string) error { _, err := Parse(path, false); return err }
+
+// Parse loads a runtime policy. ParseReader separately exposes the full kernel
+// grammar; logged policies cannot run until the daemon owns an event consumer.
 func Parse(path string, honeypot bool) (*Policy, error) {
-	f, err := os.Open(path)
+	// Nonblocking open lets us reject FIFOs before waiting for a writer. Inspect
+	// the opened descriptor, not the path, so a symlink swap cannot bypass this.
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
+	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
-	return ParseReader(f, honeypot)
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	null, err := os.Stat("/dev/null")
+	if !info.Mode().IsRegular() && (err != nil || !os.SameFile(info, null)) {
+		return nil, fmt.Errorf("rules file must be a regular file or /dev/null")
+	}
+	// Bound total work even when a regular file is being appended concurrently.
+	const maxBytes = 16 << 20
+	input := &io.LimitedReader{R: f, N: maxBytes + 1}
+	policy, err := ParseReader(input, honeypot)
+	if input.N == 0 {
+		return nil, fmt.Errorf("rules file exceeds 16 MiB")
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, rule := range policy.Config.Rules[:policy.Config.RuleCount] {
+		if rule.Log != 0 {
+			return nil, fmt.Errorf("line %d: logging requires pending telemetry integration", rule.Line)
+		}
+	}
+	return policy, nil
 }
 
 // Prefix accepts a single address or a normalized mixed-family CIDR. IPv4-mapped

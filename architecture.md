@@ -21,9 +21,10 @@ requires pins, use only an owned subtree and clean it on every failure/stop.
 - XDP implements parsing, first-match policy, sets, per-rule/source buckets,
   jail/scans, bounce/redirect, counters and event production. Start/reload publish
   complete policy generations; live set edits and atomic unjail operate on maps.
-- Stats/dashboard still use the old counter-only adapter. Jail/log snapshots,
-  full generation metadata and continuous event consumption require C's provider;
-  the jail/log commands explicitly report that pending integration on this branch.
+- CLI/HTTP stats use generation-consistent StateReader records, with rule/set
+  metadata, active jail count and source ranking. Jail/log snapshots and continuous
+  event consumption require C's provider; jail/log commands and runtime `log`
+  policies explicitly reject that pending integration on this branch.
 - The binary embeds the built ELF. No Go bindings generator is required yet;
   an ELF-layout test checks the shared counter ABI without root.
 

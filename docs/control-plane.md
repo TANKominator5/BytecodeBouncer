@@ -3,8 +3,10 @@
 This branch implements strict rules parsing, production generation construction,
 atomic link publication, live set mutations and ABI v5 atomic unjail. It does not
 claim Issue B acceptance before C's telemetry provider is integrated: the old
-counter-only stats adapter remains, jail/log explicitly fail, and no consumer
-drains logged events yet. Use the observability integration branch for the full
+counter-only adapter is retained for bootstrap callers, jail/log explicitly fail,
+and runtime logging policies are rejected until an event consumer is integrated.
+Daemon CLI/HTTP stats now use generation-consistent map snapshots, including
+rule/set records, source ranking and active jail count. Use the observability integration branch for the full
 daemon. One-second worst-case reload and Linux 6.8 checks remain required.
 
 ## Shared boundary coordination
@@ -54,3 +56,16 @@ The smoke test's former unsupported-reload assertion was updated because reload
 is now implemented. This is a necessary cross-owner test change. Target Linux
 6.8, adversarial CLI reload/sets stress, command timing at worst capacities and
 the complete observability provider remain integration checks, not presumed passes.
+
+## Review fixes
+
+Runtime policy loading opens nonblocking and checks the opened descriptor before
+reading, accepting regular files and `/dev/null` only. Total input is capped at
+16 MiB, including comments, to bound work for concurrently growing files. FIFO,
+device, oversized and logged-policy failures leave the active generation intact.
+The complete grammar remains available through ParseReader for kernel tests.
+
+The stats fix crosses into C's observe ownership and extends the namespace smoke
+test. It uses the existing shared StateReader and JSON types with no ABI change.
+Focused tests cover generation metadata, rule counters, alphabetical sets,
+full IPv4/IPv6 numeric source ordering, active jail expiry and detached snapshots.

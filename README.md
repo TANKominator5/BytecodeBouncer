@@ -64,13 +64,17 @@ namespace/socket ownership is checked before cleanup. Failed startup rolls back
 resources it created. Build and demo setup remain separate; `trafficcop start`
 still operates on an existing interface as the grading harness requires.
 
-The complete rules grammar, policy enforcement, optional honeypot argument,
+The complete kernel rules grammar, policy enforcement, optional honeypot argument,
 atomic reload, live `set add|del` and `unjail` are implemented. `jail`/`log` still
-explicitly fail until C's telemetry provider is wired; stats remain counter-only
-on this foundation branch. See [control-plane handoff](docs/control-plane.md).
+explicitly fail until C's telemetry provider is wired. Runtime policies with `log`
+are rejected rather than losing events without a consumer; `ParseReader` retains
+the complete grammar for kernel tests. CLI and HTTP stats use the active generation,
+rule/set records, active jail count and top five full-address source totals.
+Policy files must be regular files (or `/dev/null`) and at most 16 MiB; FIFOs and
+other devices are rejected before reading. See [control-plane handoff](docs/control-plane.md).
 The kernel now parses Ethernet/VLAN/IPv4/options/fragments/IPv6 extensions and
 classifies malformed frames correctly. With bootstrap configuration, valid IP
-passes except unmatched non-first fragments, which drop. Stats panels/event
+passes except unmatched non-first fragments, which drop. Dashboard panels and event
 history still need Person C's integration. Do not assume those features are ready.
 
 ### Person A dataplane tests and handoff
