@@ -107,6 +107,17 @@ func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string
 	}
 	owned.Config = cfg
 	spec := p.spec.Copy()
+	// A callback's variable rule index hides individual frozen config fields
+	// from older verifiers. Explicit read-only feature unions let them prune
+	// paths absent from this generation without changing first-match semantics.
+	var actions, matches uint32
+	for _, r := range cfg.Rules[:cfg.RuleCount] {
+		actions |= 1 << r.Action
+		matches |= r.Matches
+	}
+	if err := spec.RewriteConstants(map[string]interface{}{"enabled_actions": actions, "enabled_matches": matches}); err != nil {
+		return nil, nil, err
+	}
 	spec.Maps["config"].Contents = []ebpf.MapKV{{Key: uint32(0), Value: cfg}}
 	// Freeze BEFORE program verification and forbid program-side config writes.
 	// The verifier can then prune disabled features/constant policy fields as

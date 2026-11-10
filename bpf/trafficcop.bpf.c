@@ -63,6 +63,12 @@ struct {
 /* Retain the event schema in ELF BTF for consumers' layout checks. */
 const struct tc_event event_abi = {};
 
+/* The production loader specializes these immutable per-generation masks from
+ * the validated rules. The generic object keeps every feature enabled for the
+ * ABI/kernel fixtures. No rule or packet verdict moves into userspace. */
+const volatile __u32 enabled_actions = ~0U;
+const volatile __u32 enabled_matches = ~0U;
+
 #include "match.h"
 #include "state.h"
 #include "actions.h"
@@ -110,12 +116,12 @@ SEC("xdp") int trafficcop(struct xdp_md *ctx)
         __u32 index = match.index;
         struct tc_rule *rule = &cfg->rules[index];
         int verdict = rule->action;
-        if (verdict == TC_LIMIT)
+        if ((enabled_actions & (1U << TC_LIMIT)) && verdict == TC_LIMIT)
             verdict = take_token(index, &packet.src, rule, now, h) ? TC_PASS : TC_DROP;
-        else if (verdict == TC_JAIL) {
+        else if ((enabled_actions & (1U << TC_JAIL)) && verdict == TC_JAIL) {
             jail_source(&packet.src, now, now + (__u64)rule->jail_seconds * 1000000000, h);
             verdict = TC_DROP;
-        } else if (verdict == TC_BOUNCE) {
+        } else if ((enabled_actions & (1U << TC_BOUNCE)) && verdict == TC_BOUNCE) {
             /* Re-establish the writable packet bounds after helper calls. */
             data = (void *)(long)ctx->data;
             end = (void *)(long)ctx->data_end;
@@ -129,7 +135,7 @@ SEC("xdp") int trafficcop(struct xdp_md *ctx)
                     data[i + 6] = tmp;
                 }
             }
-        } else if (verdict == TC_HONEYPOT) {
+        } else if ((enabled_actions & (1U << TC_HONEYPOT)) && verdict == TC_HONEYPOT) {
             /* Never silently fall back to PASS when redirect cannot be set up. */
             verdict = bpf_redirect(cfg->honeypot_ifindex, 0);
         }

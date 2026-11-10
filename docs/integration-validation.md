@@ -1,5 +1,44 @@
 # Issues B/C integration evidence — 10 November 2026
 
+## CI reload regression — 11 November 2026
+
+Both attempts of [run 42865136788](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/42865136788)
+failed in `firewall.py` on the first successful reload: the CLI exceeded its
+970 ms IPC deadline. The same fixture passed on WSL, so rerunning alone was not
+a fix. The command deadline and sub-one-second bench assertions are unchanged.
+
+The production loader now rewrites two frozen ELF constants with the union of
+actions/matches in the validated candidate. Variable rule indices previously
+hid individual config values from the verifier, leaving unused branches to be
+analyzed. Masks only prune absent features; XDP still evaluates every configured
+condition and makes every verdict. The generic kernel fixtures leave all features
+enabled. Kernel ABI v5, rule capacity, map capacities and reload persistence are
+unchanged. These are coordinated A/B loader/BPF changes, not a pipeline bypass.
+
+A standalone QEMU/TCG boot of Ubuntu `6.8.0-149-generic` reproduced the excessive
+verification work: 212,296 instructions for the default-drop/one-pass-rule
+candidate before specialization, 61,867 after. Timing under CPU emulation is
+**not** a native deadline benchmark. The new `TestKernelProductionReloadPreparation`
+loads the two integration reload policies, exercises their verdicts/scan threshold
+and reports preparation/close time and verified instruction counts.
+
+This also revealed a Linux 6.8 scan-policy rejection (`tail_call abusing map_ptr`):
+the address-taken reclamation selector was reloaded after a map helper, keeping
+both jail/scan branches alive and merging their iterator call sites. A separate
+lookup key preserves the constant selector. The same loader regression then
+passed on the emulated Linux 6.8 kernel. This narrow loader/test-run validation
+does not replace full Linux 6.8 namespace/wire/performance acceptance.
+
+Additional production tests exercise specialized IPv4/IPv6 prefix, source/dest
+set, source/destination port, ICMP and VLAN matches with matching/nonmatching
+frames. Local build, race/vet, full kernel suite and namespace integration pass;
+the hour-old cancellation subfixture still skips on short-uptime WSL.
+The separate daemon stress rerun passed at 24,999 logged decisions/s, max
+adversarial reload 0.147 s, 64-limit reload 0.270 s and 10,000-prefix reload
+0.134 s. An earlier run in this session exceeded one second at the 64-limit
+allocation step; worst-case allocation latency therefore remains open, not fixed
+by this verifier optimization.
+
 Environment: Ubuntu 24.04.3 in WSL2, x86-64 Linux
 `6.18.54.1-microsoft-standard-WSL2`, Go 1.22.2, Clang 18.1.3. Linux 6.8 target
 runtime, fresh-machine build and a final flood speed benchmark remain unverified.

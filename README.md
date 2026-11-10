@@ -92,6 +92,8 @@ All packet decisions happen inside XDP; Go only manages configuration/state and
 observability. Each reload constructs an immutable private program/config and
 atomically updates the existing XDP link. Persistent counters, jail/cancellation
 records and log history survive; sets and per-rule counters are replaced.
+Immutable per-generation feature masks prune unused verifier paths without
+relaxing the one-second reload deadline or disabling configured rules.
 
 CLI `stats` and `/stats.json` use the same snapshot implementation. `/jail.json`
 and `/log.json` expose those same command snapshots; `/health.json` separately

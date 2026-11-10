@@ -66,6 +66,9 @@ The production loader now creates a private BPF_F_RDONLY_PROG config map and
 freezes it before program verification, reuses persistent maps and builds fresh
 sets, buckets, scan state and rule counters. Only a successful link update changes
 the active collection/version; failed candidates close their own resources.
+Frozen ELF action/match masks are derived from each validated candidate, letting
+older verifiers prune unused features despite variable rule indices. Generic
+kernel fixtures keep every feature enabled; packet decisions remain inside XDP.
 Mutation serialization and snapshot read locks protect collection/metadata
 lifetime. All source/jail map reads use batches; jail reads take BPF_F_LOCK.
 Private limit-map allocation uses at most four workers to meet the measured
