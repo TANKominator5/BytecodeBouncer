@@ -1,4 +1,5 @@
 #include <linux/bpf.h>
+#include <linux/errno.h>
 #include <bpf/bpf_helpers.h>
 #include "contract.h"
 #include "parse.h"
@@ -25,6 +26,12 @@ ARRAY_MAP(rule_counters, BPF_MAP_TYPE_PERCPU_ARRAY, TC_MAX_RULES, struct tc_rule
 SOURCE_MAP(sources, TC_STATE_SOURCES, __u64);
 SOURCE_MAP(jail, TC_STATE_SOURCES, struct tc_jail_value);
 SOURCE_MAP(scans, TC_SCAN_SOURCES, struct tc_scan_value);
+/* Non-locking per-CPU seed avoids an 8 KiB stack allocation. Only the header
+ * changes; the bitmap stays zero. Separate from the locked HASH value's BTF. */
+struct scan_seed { __u32 lock, count, retired, reserved;
+    __u64 generation, start_ns, pending_until_ns, ports[1024]; };
+_Static_assert(sizeof(struct scan_seed) == sizeof(struct tc_scan_value), "scan seed ABI");
+ARRAY_MAP(scan_seed, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct scan_seed);
 
 struct bucket_map {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -53,8 +60,6 @@ struct {
     __uint(max_entries, 1 << 24);
 } events SEC(".maps");
 
-/* Read-only zero seed avoids an 8 KiB stack allocation on first scan packet. */
-static const struct tc_scan_value empty_scan;
 /* Retain the event schema in ELF BTF for consumers' layout checks. */
 const struct tc_event event_abi = {};
 

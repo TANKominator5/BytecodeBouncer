@@ -167,3 +167,11 @@ port-bearing frame, including a repeated destination port, retries that decision
 and drops until it is installed or its original deadline expires. Reclamation
 preserves pending decisions; successful installation clears the matching pending
 deadline. This prevents transient collector contention from bypassing detection.
+
+New jail values are born with their release deadline, and new scan values with
+the current generation/start time. Collectors therefore cannot mistake a freshly
+inserted value for expired state before its first writer obtains the lock.
+`scan_seed` is a private per-generation per-CPU zero-bitmap scratch map; do not
+reuse it across generations or mutate it from userspace. Same-key `-EEXIST`
+insertion races relookup existing state without a reclamation walk. A collector
+continues past a failed deletion instead of aborting with zero progress.

@@ -20,6 +20,7 @@ static long reclaim_jail(void *map, const void *key, void *raw, void *context)
         bpf_spin_lock(&value->lock);
         value->retired = 0;
         bpf_spin_unlock(&value->lock);
+        return 0;
     }
     return 1;
 }
@@ -38,6 +39,7 @@ static long reclaim_scan(void *map, const void *key, void *raw, void *context)
         bpf_spin_lock(&value->lock);
         value->retired = 0;
         bpf_spin_unlock(&value->lock);
+        return 0;
     }
     return 1;
 }
@@ -89,8 +91,9 @@ static __always_inline int jail_source(const struct tc_address *src, __u64 until
     for (int attempt = 0; attempt < 4; attempt++) {
         struct tc_jail_value *value = bpf_map_lookup_elem(&jail, src);
         if (!value) {
-            struct tc_jail_value initial = {};
-            if (bpf_map_update_elem(&jail, src, &initial, BPF_NOEXIST)) {
+            struct tc_jail_value initial = { .until_ns = until };
+            long inserted = bpf_map_update_elem(&jail, src, &initial, BPF_NOEXIST);
+            if (inserted && inserted != -EEXIST) {
                 reclaim_state(0, bpf_ktime_get_ns(), 0);
                 bpf_map_update_elem(&jail, src, &initial, BPF_NOEXIST);
             }
@@ -151,9 +154,15 @@ static __always_inline int scan_source(const struct tc_packet *p, const struct t
 {
     struct tc_scan_value *value = bpf_map_lookup_elem(&scans, &p->src);
     if (!value) {
-        if (bpf_map_update_elem(&scans, &p->src, &empty_scan, BPF_NOEXIST)) {
+        __u32 zero = 0;
+        struct scan_seed *seed = bpf_map_lookup_elem(&scan_seed, &zero);
+        if (!seed) { if (h) h->scan_full++; return -1; }
+        seed->generation = cfg->generation;
+        seed->start_ns = now;
+        long inserted = bpf_map_update_elem(&scans, &p->src, seed, BPF_NOEXIST);
+        if (inserted && inserted != -EEXIST) {
             reclaim_state(1, now, cfg);
-            bpf_map_update_elem(&scans, &p->src, &empty_scan, BPF_NOEXIST);
+            bpf_map_update_elem(&scans, &p->src, seed, BPF_NOEXIST);
         }
         value = bpf_map_lookup_elem(&scans, &p->src);
     }

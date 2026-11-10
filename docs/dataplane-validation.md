@@ -130,3 +130,11 @@ release the flag and verify jail installation recovers. Atomic-unjail tests
 verify retired records cannot be revived, absent/active results are correct and
 later kernel jail decisions still take effect. These tests pass on the ARM64
 Linux 7.0 host; they are not a Linux 6.8 concurrency-stress claim.
+
+GLM review follow-up: benign same-key insertion races no longer trigger sweeps;
+fresh jail/scan values carry live deadlines/generation before publication;
+failed deletions continue iteration. The active-scan saturation regression now
+asserts the later threshold packet increments jailed, and a new four-goroutine
+first-touch regression verifies 64 shared sources retain all four distinct ports
+without health failures. Focused tests, the full kernel suite, native wire/link
+replacement checks, lifecycle/demo checks, race tests and vet passed locally.

@@ -1270,6 +1270,9 @@ func TestKernelExpiredStateReclamation(t *testing.T) {
 			t.Fatal("capacity failure counted as jail")
 		}
 		runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(2)), drop)
+		if totals(t, c).Jailed != 1 {
+			t.Fatal("threshold drop was not accounted as jailed")
+		}
 	})
 }
 
@@ -1361,5 +1364,37 @@ func TestKernelAtomicUnjail(t *testing.T) {
 		t.Fatal("new jail was lost")
 	}
 	runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(10)), pass)
+	healthy(t, c)
+}
+
+func TestKernelConcurrentScanFirstTouch(t *testing.T) {
+	conf := cfg()
+	conf.ScanPorts = 10
+	conf.ScanWindowSeconds = 60
+	conf.ScanJailSeconds = 60
+	c := loadPolicySized(t, conf, nil, 128)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func(port uint16) {
+			defer wg.Done()
+			<-start
+			for source := 1; source <= 64; source++ {
+				runPacket(t, c, ipv4(fmt.Sprintf("192.0.2.%d", source), 17, 0, 5, udp(port)), pass)
+			}
+		}(uint16(worker + 1))
+	}
+	close(start)
+	wg.Wait()
+	for source := 1; source <= 64; source++ {
+		var state testScan
+		if err := c.Maps["scans"].LookupWithFlags(addr(fmt.Sprintf("192.0.2.%d", source)), &state, ebpf.LookupLock); err != nil {
+			t.Fatal(err)
+		}
+		if state.Count != 4 || state.Generation != 1 || state.StartNS == 0 || state.Retired != 0 {
+			t.Fatalf("lost first-touch state: %+v", state)
+		}
+	}
 	healthy(t, c)
 }
