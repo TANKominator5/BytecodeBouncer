@@ -68,8 +68,8 @@ type testSetKey struct {
 type testRuleCounters struct{ Hits, Passed, Dropped, Bounced, Honeypotted uint64 }
 type testHealth struct{ SourceFull, JailFull, ScanFull, BucketFailed, EventLost, ConfigMissing uint64 }
 type testJail struct {
-	Lock, Retired uint32
-	UntilNS       uint64
+	Lock, Retired        uint32
+	UntilNS, CancelledNS uint64
 }
 type testBucket struct{ NextNS uint64 }
 type testScan struct {
@@ -1397,4 +1397,73 @@ func TestKernelConcurrentScanFirstTouch(t *testing.T) {
 		}
 	}
 	healthy(t, c)
+}
+
+func TestKernelUnjailCancelsPendingScan(t *testing.T) {
+	conf := cfg(testRule{Action: jailAction, Proto: 1, JailSeconds: 60})
+	conf.ScanPorts = 2
+	conf.ScanWindowSeconds = 60
+	conf.ScanJailSeconds = 60
+	c := loadPolicySized(t, conf, nil, 1)
+	src := addr("192.0.2.1")
+	if err := c.Maps["jail"].Put(addr("198.51.100.1"), testJail{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Maps["maintenance"].Put(uint32(0), uint64(1)); err != nil {
+		t.Fatal(err)
+	}
+	frame := func(port uint16) []byte { return ipv4("192.0.2.1", 17, 0, 5, udp(port)) }
+	runPacket(t, c, frame(7), pass)
+	runPacket(t, c, frame(8), drop)
+	if err := c.Maps["maintenance"].Put(uint32(0), uint64(0)); err != nil {
+		t.Fatal(err)
+	}
+	runPacket(t, c, ipv4("192.0.2.1", 1, 0, 5, make([]byte, 8)), drop)
+	type request struct {
+		Src              testAddress
+		Result, Reserved uint32
+	}
+	if err := c.Maps["unjail_request"].Put(uint32(0), request{Src: src}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Programs["unjail_command"].Run(&ebpf.RunOptions{Data: make([]byte, 14)}); err != nil {
+		t.Fatal(err)
+	}
+	var result request
+	if err := c.Maps["unjail_request"].Lookup(uint32(0), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Result != 1 {
+		t.Fatalf("unjail result %d", result.Result)
+	}
+	runPacket(t, c, frame(7), pass)
+	runPacket(t, c, frame(7), pass)
+	// A fresh distinct port is a new threshold decision and may jail again.
+	runPacket(t, c, frame(9), drop)
+}
+
+func TestKernelCancellationReclamation(t *testing.T) {
+	c := loadPolicySized(t, cfg(testRule{Action: jailAction, JailSeconds: 60}), nil, 1)
+	old := addr("192.0.2.1")
+	state := testJail{CancelledNS: monotonicNS(t)}
+	if err := c.Maps["jail"].Put(old, state); err != nil {
+		t.Fatal(err)
+	}
+	frame := ipv4("192.0.2.2", 17, 0, 5, udp(9))
+	runPacket(t, c, frame, drop)
+	var kept testJail
+	if err := c.Maps["jail"].LookupWithFlags(old, &kept, ebpf.LookupLock); err != nil {
+		t.Fatal("live cancellation reclaimed:", err)
+	}
+	state.CancelledNS = monotonicNS(t) - 3601_000_000_000
+	if err := c.Maps["jail"].Update(old, state, ebpf.UpdateLock); err != nil {
+		t.Fatal(err)
+	}
+	runPacket(t, c, frame, drop)
+	if err := c.Maps["jail"].LookupWithFlags(addr("192.0.2.2"), &kept, ebpf.LookupLock); err != nil {
+		t.Fatal("expired cancellation was not reclaimed:", err)
+	}
+	if kept.UntilNS <= monotonicNS(t) {
+		t.Fatal("new jail not installed")
+	}
 }

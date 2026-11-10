@@ -46,7 +46,7 @@ logging use a common verdict-finalization path so each packet is counted once.
 `include/contract.h` is authoritative for native-endian map fields and
 network-order address bytes. Reserved bytes must be zero. Use fixed-width types,
 explicit padding, C static assertions and Go ELF/layout tests. Rule indices and
-original file line numbers are separate concepts. ABI v4 and its integration
+original file line numbers are separate concepts. ABI v5 and its integration
 protocol are documented in [docs/dataplane-abi.md](docs/dataplane-abi.md). The task
 owner authorized this shared change; B/C review remains required before merge.
 

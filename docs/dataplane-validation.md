@@ -96,7 +96,7 @@ and resource-exhaustion recovery have not been measured.
 
 ## Still required before Issue #1 acceptance / final submission
 
-- B/C integration and review of ABI v4, production map publication, strict config
+- B/C integration and review of ABI v5, production map publication, strict config
   validation, CLI operations, continuous event draining/history and snapshots.
 - Ubuntu 24.04 **Linux 6.8** verification/runtime, sustained flood speed, a
   long-running repeated reload/reclamation test on all CPUs and worst-case
@@ -118,7 +118,7 @@ On the ARM64 Linux 7.0 host, real BPF test-run regression checks passed with
 four-entry jail/scan maps and more than twelve historical sources. Expired entries
 were reclaimed, new scan sources still reached jail thresholds, and active state
 was preserved. A full active scan map dropped the new source without miscounting
-it as jailed. ABI v4 adds retirement markers and a maintenance map that must be
+it as jailed. ABI v5 adds retirement markers and a maintenance map that must be
 shared with persistent jail state on reload. Native parser tests use the system
 Clang by default (override CLANG explicitly), avoiding an unrelated Android NDK
 clang earlier in PATH. CI now runs the opt-in kernel suite as root rather than
@@ -138,3 +138,18 @@ asserts the later threshold packet increments jailed, and a new four-goroutine
 first-touch regression verifies 64 shared sources retain all four distinct ports
 without health failures. Focused tests, the full kernel suite, native wire/link
 replacement checks, lifecycle/demo checks, race tests and vet passed locally.
+
+Sol review follow-up: the pending-scan → ICMP jail rule → successful unjail →
+repeated UDP port sequence was reproduced as a failing kernel regression, then
+fixed with locked release timestamps. Repeated ports now pass after release;
+a fresh distinct port still triggers a new jail. Cancellation retention/reclamation
+is tested with a one-entry map. A non-inlined jail helper reduces verifier path
+expansion (focused local run: 358,258 processed instructions, about 730 ms
+verification). This is not evidence of one-second target CLI reload completion.
+
+Final Sol follow-up validation: the complete kernel suite, wire/replacement suite,
+bootstrap/demo integration, race tests and vet passed. Wire replacement carried
+94,944 stable-pass frames without unexpected policy drops. Verification of the
+shared jail subprogram was around 0.69–1.22 seconds across local runs (including
+parallel load). Therefore the target one-second end-to-end CLI reload deadline
+is explicitly not established and requires optimization/measurement in B's work.

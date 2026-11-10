@@ -2,8 +2,9 @@
 #define TRAFFICCOP_CONTRACT_H
 #include <linux/types.h>
 #include <linux/bpf.h>
-#define TC_ABI_VERSION 4
+#define TC_ABI_VERSION 5
 #define TC_MAX_RULES 64
+#define TC_MAX_JAIL_SECONDS 3600
 #define TC_MAX_SETS 16
 #define TC_MAX_PREFIXES 10000
 #define TC_BUCKET_SOURCES 65536
@@ -70,7 +71,7 @@ struct tc_event {
 };
 /* Userspace reads use BPF_F_LOCK; release through unjail_command, never a
  * separately locked read/modify/write that could clear a retirement marker. */
-struct tc_jail_value { struct bpf_spin_lock lock; __u32 retired; __u64 until_ns; };
+struct tc_jail_value { struct bpf_spin_lock lock; __u32 retired; __u64 until_ns, cancelled_ns; };
 
 enum tc_unjail_result { TC_UNJAIL_OK = 1, TC_UNJAIL_ABSENT = 2, TC_UNJAIL_RETRY = 3 };
 struct tc_unjail_request { struct tc_address src; __u32 result, reserved; };
@@ -94,7 +95,8 @@ _Static_assert(sizeof(struct tc_set_key) == 24, "set key ABI changed");
 _Static_assert(sizeof(struct tc_rule_counters) == 40, "rule counters ABI changed");
 _Static_assert(sizeof(struct tc_health) == 48, "health ABI changed");
 _Static_assert(sizeof(struct tc_event) == 80, "event ABI changed");
-_Static_assert(sizeof(struct tc_jail_value) == 16, "jail ABI changed");
+_Static_assert(sizeof(struct tc_jail_value) == 24, "jail ABI changed");
+_Static_assert(__builtin_offsetof(struct tc_jail_value, cancelled_ns) == 16, "cancel offset changed");
 _Static_assert(sizeof(struct tc_bucket_value) == 8, "bucket ABI changed");
 _Static_assert(sizeof(struct tc_scan_value) == 8232, "scan ABI changed");
 _Static_assert(__builtin_offsetof(struct tc_rule, src) == 24, "rule src offset changed");

@@ -113,7 +113,7 @@ SEC("xdp") int trafficcop(struct xdp_md *ctx)
         if (verdict == TC_LIMIT)
             verdict = take_token(index, &packet.src, rule, now, h) ? TC_PASS : TC_DROP;
         else if (verdict == TC_JAIL) {
-            jail_source(&packet.src, now + (__u64)rule->jail_seconds * 1000000000, h);
+            jail_source(&packet.src, now, now + (__u64)rule->jail_seconds * 1000000000, h);
             verdict = TC_DROP;
         } else if (verdict == TC_BOUNCE) {
             /* Re-establish the writable packet bounds after helper calls. */
@@ -162,7 +162,11 @@ SEC("xdp") int unjail_command(struct xdp_md *ctx)
     bpf_spin_lock(&value->lock);
     __u32 result = TC_UNJAIL_ABSENT;
     if (value->retired) result = TC_UNJAIL_RETRY;
-    else if (value->until_ns > now) { value->until_ns = 0; result = TC_UNJAIL_OK; }
+    else if (value->until_ns > now) {
+        value->until_ns = 0;
+        value->cancelled_ns = now;
+        result = TC_UNJAIL_OK;
+    }
     bpf_spin_unlock(&value->lock);
     request->result = result;
     return XDP_PASS;

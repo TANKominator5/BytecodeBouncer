@@ -1,4 +1,4 @@
-# Person A dataplane handoff (ABI v4)
+# Person A dataplane handoff (ABI v5)
 
 `include/contract.h` is the authoritative layout. Shared changes were authorized
 by the task owner; B/C review is still required before merge. A also adds kernel
@@ -36,7 +36,7 @@ Pass these persistent maps to `NewCollectionWithOptions` / `MapReplacements`:
 
 Other maps (`config`, `rule_counters`, `sets`, `buckets`, `scans`) belong to one
 generation. Scan windows and buckets restart on reload; jail/history do not.
-ABI v4 reuses the jail value's former reserved word as `retired` and adds
+ABI v5 reuses the jail value's former reserved word as `retired` and adds
 `retired,reserved` before the scan generation plus a pending jail deadline (scan size 8,232; bitmap offset 40).
 No userspace Go mirror is shipped as production code until B integrates it;
 the typed fixtures demonstrate encoding without unsafe casts.
@@ -175,3 +175,20 @@ inserted value for expired state before its first writer obtains the lock.
 reuse it across generations or mutate it from userspace. Same-key `-EEXIST`
 insertion races relookup existing state without a reclamation walk. A collector
 continues past a failed deletion instead of aborting with zero progress.
+
+## Release cancellation (ABI v5)
+
+The jail value is now 24 bytes: lock/retired, until_ns, cancelled_ns. Successful
+unjail clears until_ns and records the release time in the same locked operation.
+A scan retry carries its original decision time; jail_source rejects decisions
+at or before cancelled_ns. Thus even an in-flight retry captured before release
+cannot reinstall a canceled jail. A newer distinct-port threshold still creates
+a new decision. Canceled pending records are cleared lazily when retried.
+
+Expired jail entries with cancellation timestamps remain until 3,600 seconds
+after release, the maximum legal jail duration. Every old decision has expired
+by then; jail_source also rejects expired deadlines before inserting anything.
+This bounds cancellation retention without reopening a stale-retry race after
+reclamation. These retained records consume capacity and must be included in
+resource sizing. Do not erase cancelled_ns from userspace or while reusing jail
+maps on reload. Snapshot/list logic counts only until_ns, not cancellation records.
