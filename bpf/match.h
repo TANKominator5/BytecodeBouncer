@@ -41,23 +41,24 @@ static long match_rule(__u32 index, void *context)
     asm volatile("%0 &= 63" : "+r"(slot));
     const struct tc_rule *r = &m->cfg->rules[slot];
     const struct tc_packet *p = m->packet;
+    __u32 matches = r->matches & enabled_matches;
     if ((r->family && r->family != p->src.family) || (r->proto && r->proto != p->proto))
         return 0;
-    if ((r->matches & TC_SRC_PREFIX) && !prefix_matches(&p->src, &r->src))
+    if ((matches & TC_SRC_PREFIX) && !prefix_matches(&p->src, &r->src))
         return 0;
-    if ((r->matches & TC_DST_PREFIX) && !prefix_matches(&p->dst, &r->dst))
+    if ((matches & TC_DST_PREFIX) && !prefix_matches(&p->dst, &r->dst))
         return 0;
-    if ((r->matches & TC_SRC_SET) && !set_matches(&p->src, r->src_set))
+    if ((matches & TC_SRC_SET) && !set_matches(&p->src, r->src_set))
         return 0;
-    if ((r->matches & TC_DST_SET) && !set_matches(&p->dst, r->dst_set))
+    if ((matches & TC_DST_SET) && !set_matches(&p->dst, r->dst_set))
         return 0;
-    if ((r->matches & TC_SPORT) && (!p->has_ports || p->sport < r->sport_min || p->sport > r->sport_max))
+    if ((matches & TC_SPORT) && (!p->has_ports || p->sport < r->sport_min || p->sport > r->sport_max))
         return 0;
-    if ((r->matches & TC_DPORT) && (!p->has_ports || p->dport < r->dport_min || p->dport > r->dport_max))
+    if ((matches & TC_DPORT) && (!p->has_ports || p->dport < r->dport_min || p->dport > r->dport_max))
         return 0;
-    if ((r->matches & TC_ICMP_TYPE) && (!p->has_type || p->icmp_type != r->icmp_type))
+    if ((matches & TC_ICMP_TYPE) && (!p->has_type || p->icmp_type != r->icmp_type))
         return 0;
-    if ((r->matches & TC_VLAN) && p->vlan != r->vlan)
+    if ((matches & TC_VLAN) && p->vlan != r->vlan)
         return 0;
     m->index = slot;
     return 1;

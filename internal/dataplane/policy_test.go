@@ -151,6 +151,9 @@ func loadPolicySized(t *testing.T, config testConfig, shared map[string]*ebpf.Ma
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := reserveBucketCapacity(spec); err != nil {
+		t.Fatal(err)
+	}
 	if capacity != 0 {
 		spec.Maps["scans"].MaxEntries = capacity
 		spec.Maps["jail"].MaxEntries = capacity
@@ -1073,6 +1076,52 @@ func TestKernelEventBurst(t *testing.T) {
 	t.Logf("%d logged decisions in %s (%.0f/s), all ring events read; not a daemon-drain benchmark", packets, elapsed, float64(packets)/elapsed.Seconds())
 }
 
+// Populate on two CPUs when available to expose per-CPU LRU free-node caches.
+func populateBucketAcrossCPUs(t *testing.T, m *ebpf.Map, keys []testAddress, values []testBucket) {
+	t.Helper()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	var old unix.CPUSet
+	if err := unix.SchedGetaffinity(0, &old); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := unix.SchedSetaffinity(0, &old); err != nil {
+			t.Error(err)
+		}
+	}()
+	var cpus []int
+	for cpu := 0; cpu < 1024 && len(cpus) < 2; cpu++ {
+		if old.IsSet(cpu) {
+			cpus = append(cpus, cpu)
+		}
+	}
+	if len(cpus) == 0 {
+		t.Fatal("no allowed CPUs")
+	}
+	for part, cpu := range cpus {
+		var selected unix.CPUSet
+		selected.Set(cpu)
+		if err := unix.SchedSetaffinity(0, &selected); err != nil {
+			t.Fatal(err)
+		}
+		lo, hi := 0, len(keys)
+		if len(cpus) == 2 {
+			// Switch off the 128-node batch boundary, leaving free nodes on
+			// the first CPU instead of consuming its local cache exactly.
+			split := len(keys)/2 + 1
+			if part == 0 {
+				hi = split
+			} else {
+				lo = split
+			}
+		}
+		if n, err := m.BatchUpdate(keys[lo:hi], values[lo:hi], nil); err != nil || n != hi-lo {
+			t.Fatalf("populate CPU %d: %d %v", cpu, n, err)
+		}
+	}
+}
+
 func TestKernelBucketCapacity(t *testing.T) {
 	var rules []testRule
 	for i := 0; i < 64; i++ {
@@ -1102,9 +1151,7 @@ func TestKernelBucketCapacity(t *testing.T) {
 				keys[k] = testAddress{Family: 4, Bytes: [16]byte{10, byte(i), byte(k >> 8), byte(k)}}
 				values[k] = testBucket{NextNS: monotonicNS(t) + 1_000_000_000_000_000}
 			}
-			if _, err := m.BatchUpdate(keys, values, nil); err != nil {
-				t.Fatal(err)
-			}
+			populateBucketAcrossCPUs(t, m, keys, values)
 			it := m.Iterate()
 			count := 0
 			var key testAddress

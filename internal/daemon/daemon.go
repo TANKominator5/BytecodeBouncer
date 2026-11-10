@@ -46,8 +46,8 @@ func CallRequest(request Request) (json.RawMessage, error) {
 		return nil, errors.New("trafficcop is not running")
 	}
 	defer c.Close()
-	// Leave room to receive a successful response for work within the spec
-	// budget; timing acceptance is measured independently by the harness.
+	// Allow successful work within the spec budget to return its response.
+	// Acceptance timing is still measured by the integration harness.
 	timeout := 1500 * time.Millisecond
 	if command == "stop" {
 		timeout = 4 * time.Second
@@ -129,8 +129,13 @@ func Run(iface, rules, honeypot string, ready *os.File) (runErr error) {
 		return plane.Close()
 	}
 	defer shutdown()
-	snapshot := func() (observe.Stats, error) { return observe.StateSnapshot(plane) }
-	server := &http.Server{Handler: observe.Handler(snapshot), ReadHeaderTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second}
+	events, err := plane.Events()
+	if err != nil {
+		return err
+	}
+	telemetry := observe.New(plane, events)
+	defer telemetry.Close()
+	server := &http.Server{Handler: observe.Handler(telemetry), ReadHeaderTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second}
 	defer server.Close()
 	go func() {
 		if err := server.Serve(web); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -193,10 +198,24 @@ func Run(iface, rules, honeypot string, ready *os.File) (runErr error) {
 				if e != nil {
 					response.Error = e.Error()
 				}
-			case "jail", "log":
-				response.Error = "telemetry integration pending"
+			case "jail":
+				v, e := telemetry.Jail()
+				if e == nil {
+					response.Data, e = json.Marshal(v)
+				}
+				if e != nil {
+					response.Error = e.Error()
+				}
+			case "log":
+				v, e := telemetry.Log()
+				if e == nil {
+					response.Data, e = json.Marshal(v)
+				}
+				if e != nil {
+					response.Error = e.Error()
+				}
 			case "stats":
-				s, e := snapshot()
+				s, e := telemetry.Stats()
 				if e != nil {
 					response.Error = e.Error()
 				} else {
@@ -210,6 +229,9 @@ func Run(iface, rules, honeypot string, ready *os.File) (runErr error) {
 				e := server.Shutdown(ctx)
 				cancel()
 				if e != nil {
+					response.Error = e.Error()
+				}
+				if e = telemetry.Close(); e != nil {
 					response.Error = e.Error()
 				}
 				if e = shutdown(); e != nil {

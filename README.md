@@ -1,9 +1,9 @@
 # BytecodeBouncer / trafficcop
 
-Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. **The kernel and
-control-plane foundation are implemented; full telemetry integration is pending.**
-This is not yet the complete, integrated firewall. Deadline: 13 November 2026,
-11:59 p.m. IST.
+Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. The kernel, complete
+rules/CLI, atomic reload, telemetry and dashboard are integrated. Local checks
+run on Ubuntu 24.04 / WSL Linux 6.18; **the judges' Linux 6.8 validation and final
+flood benchmark remain open**. Deadline: 13 November 2026, 11:59 p.m. IST.
 
 Read [problem statement](problem_Statement.md), [architecture](architecture.md),
 [contributor instructions](AGENTS.md), and [implementation checklist](docs/spec-checklist.md).
@@ -30,14 +30,13 @@ headers at build time. The target is x86-64 Ubuntu 24.04/Linux 6.8, four CPUs.
 
 ```sh
 make test
-sudo tests/integration/bootstrap.sh
+make integration
+make stress
 ```
 
-The integration test creates its own namespace and veth pair and always attempts
-cleanup. It checks readiness/time limits, native XDP attachment, packet counters,
-stats HTTP schema, singleton handling, failed/successful reload, rejected policy
-inputs, detach and restart.
-Never attach this scaffold to a production interface.
+Integration/stress tests create private namespaces/veths and attempt cleanup on
+every exit. They refuse an existing daemon. No tests replace a host attachment.
+Do not deploy on a production interface without target-platform verification.
 
 For a persistent demo, the setup script creates its own namespace and veth pair:
 
@@ -49,8 +48,13 @@ sudo ./demo.sh dashboard
 
 The last command runs a foreground localhost proxy. Open **http://127.0.0.1:8088/**
 in your normal browser. Ctrl+C stops the proxy; the demo remains running.
-The proxy uses Python's standard library and forwards only the dashboard and
-stats endpoints into the namespace. It fails clearly if host port 8088 is busy.
+The proxy uses Python's standard library and forwards only fixed dashboard
+assets/JSON endpoints into the namespace. It fails if host port 8088 is busy.
+The demo loads `tests/fixtures/demo.rules`. To generate illustrated traffic:
+
+```sh
+sudo nsenter --net=/run/netns/trafficcop-demo python3 tests/bench/demo_traffic.py
+```
 
 When finished:
 
@@ -65,20 +69,53 @@ namespace/socket ownership is checked before cleanup. Failed startup rolls back
 resources it created. Build and demo setup remain separate; `trafficcop start`
 still operates on an existing interface as the grading harness requires.
 
-The complete kernel rules grammar, policy enforcement, optional honeypot argument,
-atomic reload, live `set add|del` and `unjail` are implemented. `jail`/`log` still
-explicitly fail until C's telemetry provider is wired. Runtime policies with `log`
-are rejected rather than losing events without a consumer; `ParseReader` retains
-the complete grammar for kernel tests. CLI and HTTP stats use the active generation,
-rule/set records, active jail count and top five full-address source totals.
-Top sources include both IPv4 and IPv6, following the later IPv6 extension of
-the specification; ties use numeric order, IPv4 first. Policy files must be regular
-files (or `/dev/null`) and at most 16 MiB; FIFOs and
-other devices are rejected before reading. See [control-plane handoff](docs/control-plane.md).
-The kernel now parses Ethernet/VLAN/IPv4/options/fragments/IPv6 extensions and
-classifies malformed frames correctly. With bootstrap configuration, valid IP
-passes except unmatched non-first fragments, which drop. Dashboard panels and event
-history still need Person C's integration. Do not assume those features are ready.
+## CLI and behavior
+
+Inside your dedicated network namespace:
+
+```sh
+./trafficcop start eth0 arcade.rules hp0   # optional hp0 honeypot interface
+./trafficcop reload arcade-next.rules
+./trafficcop set add cheaters 2001:db8:bad::/48
+./trafficcop set del cheaters 10.0.0.7/32
+./trafficcop stats
+./trafficcop jail
+./trafficcop unjail 2001:db8::7
+./trafficcop log
+./trafficcop stop
+```
+
+Rules implement every specified action/condition, mixed-family prefixes/sets,
+first-match ordering, VLAN/options/fragments and bounded IPv6 extension chains.
+Rate limits have independent 65,536-source LRU maps per rule, shared across CPUs.
+All packet decisions happen inside XDP; Go only manages configuration/state and
+observability. Each reload constructs an immutable private program/config and
+atomically updates the existing XDP link. Persistent counters, jail/cancellation
+records and log history survive; sets and per-rule counters are replaced.
+Immutable per-generation feature masks prune unused verifier paths without
+relaxing the one-second reload deadline or disabling configured rules.
+
+CLI `stats` and `/stats.json` use the same snapshot implementation. `/jail.json`
+and `/log.json` expose those same command snapshots; `/health.json` separately
+reports allocation/ring/stream failures without altering the required stats
+schema. A dedicated goroutine drains events and retains exactly the newest
+1,000 oldest-first; logged decisions are never synthesized in userspace.
+A temporary log snapshot timeout is recoverable: later requests wait for the
+outstanding flush barrier before issuing a new one. Terminal stream errors stay
+visible through diagnostics. Runtime policy files must be regular files or
+`/dev/null`, at most 16 MiB including comments; FIFOs/devices are rejected before
+opening for reads. The grammar reader remains available for in-memory tests.
+Finite state limits and target-platform gaps are documented in
+[integration validation](docs/integration-validation.md).
+
+## Dashboard
+
+Embedded HTML/CSS/JavaScript updates every second, including passed/dropped pps,
+rule hits, source ranking, jail, latest events, malformed/other and diagnostics.
+No frontend dependencies. Actual isolated-demo screenshot (traffic idle at capture,
+so pps is zero; totals come from real XDP decisions on synthetic frames):
+
+![Live Bytecode Bouncer dashboard](docs/dashboard.png)
 
 ### Person A dataplane tests and handoff
 
@@ -89,7 +126,7 @@ sudo bash bpf/netns-test.sh     # private veth wire actions/replacement under lo
 ```
 
 The XDP implementation supports all rule conditions and actions, mixed-family
-sets, independent 65,536-source limit maps, jail/scans and logged decisions.
+sets, independent limit maps with at least 65,536 usable source entries each, jail/scans and logged decisions.
 See [ABI and B/C handoff](docs/dataplane-abi.md) and
 [actual validation/limitations](docs/dataplane-validation.md). The ABI includes
 explicit diagnostic counters for finite map capacity and event-ring failures.
@@ -131,7 +168,11 @@ before integrating. Each person uses a separate clone/worktree and branch.
 
 ## Validation evidence
 
-See [docs/bootstrap-validation.md](docs/bootstrap-validation.md) for actual checks
-and platform limitations. CI runs build, unit/race checks, vet and the privileged
-namespace smoke test on Ubuntu 24.04. A full-spec benchmark and dashboard
-screenshot are still required before submission; no screenshot is fabricated.
+See [integration validation](docs/integration-validation.md),
+[kernel validation](docs/dataplane-validation.md) and historical
+[bootstrap validation](docs/bootstrap-validation.md). Measured daemon logging:
+90,000 decisions in 3.601 s (~24,997/s), zero loss, exact last-1,000 history under
+concurrent/slow HTTP clients. These are local measurements, not a flood/NIC
+throughput ranking or a Linux 6.8 guarantee. CI is configured for the expanded
+smoke suite on Ubuntu 24.04; inspect its result after publishing rather than
+assuming it passed.

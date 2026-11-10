@@ -13,8 +13,12 @@ with urllib.request.urlopen('http://127.0.0.1:8088' + sys.argv[1], timeout=2) as
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        # Only expose the two demo endpoints; never proxy arbitrary URLs/paths.
-        if self.path not in ("/", "/stats.json"):
+        # Fixed local dashboard assets/endpoints only; no arbitrary URLs/paths.
+        types = {"/": "text/html; charset=utf-8", "/app.js": "text/javascript; charset=utf-8",
+                 "/app.css": "text/css; charset=utf-8", "/stats.json": "application/json",
+                 "/jail.json": "application/json", "/log.json": "application/json",
+                 "/health.json": "application/json"}
+        if self.path not in types:
             self.send_error(404)
             return
         try:
@@ -26,7 +30,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_error(503, "Demo unavailable; start it with sudo ./demo.sh start")
             return
         self.send_response(200)
-        self.send_header("Content-Type", "application/json" if self.path == "/stats.json" else "text/html; charset=utf-8")
+        self.send_header("Content-Type", types[self.path])
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(result.stdout)))
         self.end_headers()

@@ -27,8 +27,7 @@ type Policy struct {
 
 func Validate(path string) error { _, err := Parse(path, false); return err }
 
-// Parse loads a runtime policy. ParseReader separately exposes the full kernel
-// grammar; logged policies cannot run until the daemon owns an event consumer.
+// Parse loads a finite runtime policy without opening blocking special files.
 func Parse(path string, honeypot bool) (*Policy, error) {
 	// O_PATH inspects the inode without invoking device open handlers. Reopen
 	// the validated descriptor through procfs so path swaps cannot bypass this.
@@ -60,11 +59,6 @@ func Parse(path string, honeypot bool) (*Policy, error) {
 	}
 	if err != nil {
 		return nil, err
-	}
-	for _, rule := range policy.Config.Rules[:policy.Config.RuleCount] {
-		if rule.Log != 0 {
-			return nil, fmt.Errorf("line %d: logging requires pending telemetry integration", rule.Line)
-		}
 	}
 	return policy, nil
 }
@@ -162,12 +156,18 @@ func ParseReader(input io.Reader, honeypot bool) (*Policy, error) {
 	names := make(map[string]uint8)
 	seen := make(map[string]bool)
 	var refs []reference
-	s := bufio.NewScanner(input)
-	s.Buffer(make([]byte, 4096), 2<<20)
+	s := bufio.NewReader(input)
 	line, prefixes := 0, 0
-	for s.Scan() {
+	for {
+		raw, readErr := s.ReadString('\n')
+		if readErr != nil && readErr != io.EOF {
+			return nil, fmt.Errorf("line %d: %w", line+1, readErr)
+		}
+		if raw == "" && readErr == io.EOF {
+			break
+		}
 		line++
-		text, _, _ := strings.Cut(s.Text(), "#")
+		text, _, _ := strings.Cut(strings.TrimSuffix(strings.TrimSuffix(raw, "\n"), "\r"), "#")
 		w := strings.FieldsFunc(text, func(c rune) bool { return c == ' ' || c == '\t' })
 		if len(w) == 0 {
 			continue
@@ -389,9 +389,6 @@ func ParseReader(input io.Reader, honeypot bool) (*Policy, error) {
 		}
 		p.Config.Rules[p.Config.RuleCount] = r
 		p.Config.RuleCount++
-	}
-	if err := s.Err(); err != nil {
-		return nil, fmt.Errorf("line %d: %w", line+1, err)
 	}
 	for _, ref := range refs {
 		id, ok := names[ref.name]

@@ -127,6 +127,12 @@ func TestBinaryAddresses(t *testing.T) {
 	}
 }
 
+func TestLongValidComment(t *testing.T) {
+	if _, err := ParseReader(strings.NewReader("#"+strings.Repeat("x", 3<<20)+"\npass"), false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimePolicyFiles(t *testing.T) {
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "fifo")
@@ -141,20 +147,24 @@ func TestRuntimePolicyFiles(t *testing.T) {
 	if _, err := Parse("/dev/null", false); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "policy")
-	for _, input := range []string{"# comment\npass log", strings.Repeat("#\n", (16<<20)/2+1)} {
-		if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+	path := filepath.Join(dir, "rules")
+	for _, tc := range []struct {
+		size  int
+		valid bool
+	}{{16 << 20, true}, {(16 << 20) + 1, false}} {
+		if err := os.WriteFile(path, []byte("#"+strings.Repeat("x", tc.size-1)), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Parse(path, false); err == nil {
-			t.Fatal("accepted unsupported or oversized policy")
+		_, err := Parse(path, false)
+		if (err == nil) != tc.valid {
+			t.Fatalf("size %d: %v", tc.size, err)
 		}
 	}
-	if err := os.WriteFile(path, []byte("default drop\npass src ::1"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("pass log\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	policy, err := Parse(path, false)
-	if err != nil || policy.Config.RuleCount != 1 {
-		t.Fatalf("regular policy: %v %+v", err, policy)
+	p, err := Parse(path, false)
+	if err != nil || p.Config.Rules[0].Log != 1 {
+		t.Fatalf("logging policy: %+v %v", p, err)
 	}
 }

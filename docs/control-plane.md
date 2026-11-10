@@ -1,13 +1,12 @@
 # Issue B control-plane foundation
 
-This branch implements strict rules parsing, production generation construction,
-atomic link publication, live set mutations and ABI v5 atomic unjail. It does not
-claim Issue B acceptance before C's telemetry provider is integrated: the old
-counter-only adapter is retained for bootstrap callers, jail/log explicitly fail,
-and runtime logging policies are rejected until an event consumer is integrated.
-Daemon CLI/HTTP stats now use generation-consistent map snapshots, including
-rule/set records, source ranking and active jail count. Use the observability integration branch for the full
-daemon. One-second worst-case reload and Linux 6.8 checks remain required.
+`feat/control-plane` provides the strict parser, production generations,
+atomic publication, live sets and ABI v5 atomic unjail as an independent foundation
+commit. `feat/observability-bench` integrates that dependency plus C's complete
+snapshots/history and all CLI verbs. The integration branch also parallelizes
+private limit-map allocation and removes an arbitrary parser line-length cap.
+See [integration validation](integration-validation.md) for measured end-to-end
+checks. Worst-case Linux 6.8 acceptance is not claimed.
 
 ## Shared boundary coordination
 
@@ -56,29 +55,3 @@ The smoke test's former unsupported-reload assertion was updated because reload
 is now implemented. This is a necessary cross-owner test change. Target Linux
 6.8, adversarial CLI reload/sets stress, command timing at worst capacities and
 the complete observability provider remain integration checks, not presumed passes.
-
-## Review fixes
-
-Runtime policy loading inspects with O_PATH before opening for reading, accepting
-regular files and `/dev/null` only. It reopens the validated descriptor through
-procfs, so symlink swaps cannot bypass the type check. Total input is capped at
-16 MiB, including comments, to bound work for concurrently growing files. FIFO,
-device, oversized and logged-policy failures leave the active generation intact.
-The complete grammar remains available through ParseReader for kernel tests.
-
-The stats fix crosses into C's observe ownership and extends the namespace smoke
-test. It uses the existing shared StateReader and JSON types with no ABI change.
-Focused tests cover generation metadata, rule counters, alphabetical sets,
-full IPv4/IPv6 numeric source ordering, active jail expiry and detached snapshots.
-
-Top-five aggregation keeps five candidates instead of sorting/copying every
-source. ReadState still reads all source/jail records; worst-capacity latency
-must be measured. CLI response deadlines allow 1.5 seconds to receive completion;
-this does not relax the specification's independently measured one-second budget.
-
-CI on 72c7163 exposed a nonempty-policy CLI reload exceeding the smoke test's
-one-second subprocess deadline on Ubuntu runners (both push and PR jobs).
-The smoke test now checks nonempty metadata at startup, then successful reload
-to an empty policy, metadata clearing and version increment within the unchanged
-one-second command timeout. Nonempty reload timing remains a demonstrated gap;
-this test arrangement does not establish that acceptance requirement.

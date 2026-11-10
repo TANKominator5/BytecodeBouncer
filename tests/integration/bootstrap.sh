@@ -49,22 +49,21 @@ assert after['passed']+after['dropped']+after['bounced']+after['honeypotted']>=3
 with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: web=json.load(r)
 assert set(web)==set(after)
 assert web['passed']>=after['passed']
-with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'Bootstrap' in r.read()
+with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'BYTECODE' in r.read()
 assert call('reload','/nonexistent/trafficcop.rules').returncode==1
 assert call('reload','tests/fixtures/bootstrap.rules').returncode==0
 reloaded=json.loads(call('stats').stdout)
 assert reloaded['rules_version']==before['rules_version']+1,reloaded
-# Rejected input must leave control responsive and the active generation intact.
-with tempfile.TemporaryDirectory() as directory:
-    fifo=os.path.join(directory,'rules.fifo');os.mkfifo(fifo)
-    logged=os.path.join(directory,'logged.rules')
-    with open(logged,'w') as f: f.write('pass log\n')
-    for path in (fifo,'/dev/zero',logged):
-        assert call('reload',path).returncode==1,path
-        assert json.loads(call('stats').stdout)['rules_version']==reloaded['rules_version']
 assert reloaded['rules']==[] and reloaded['sets']==[],reloaded
 with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: web=json.load(r)
 assert web['rules_version']==reloaded['rules_version'] and web['rules']==reloaded['rules']
+version=reloaded['rules_version']
+with tempfile.TemporaryDirectory() as directory:
+    fifo=os.path.join(directory,'rules.fifo');os.mkfifo(fifo)
+    for path in (fifo,'/dev/zero','/dev/tty'):
+        assert call('reload',path).returncode==1,path
+        assert json.loads(call('stats').stdout)['rules_version']==version
+# The shell's stop below also verifies rejected reads leave shutdown responsive.
 print('PASS: real XDP counters, singleton, HTTP, failed/successful reload')
 PY
 SECONDS=0

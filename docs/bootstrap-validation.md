@@ -1,5 +1,8 @@
 # Bootstrap validation
 
+Historical bootstrap evidence below. Current B/C integrated behavior and local
+measurements are in [integration-validation.md](integration-validation.md).
+
 Local environment: ARM64 Linux 7.0.0-1013-oracle, Go 1.26.8, system Clang 21.
 Target: Ubuntu 24.04, Linux 6.8, x86-64, four CPUs.
 
@@ -42,10 +45,13 @@ bound, stats correctly failed as stopped, and a second stop succeeded harmlessly
 ## Control-plane review regression checks (11 November 2026)
 
 The updated namespace smoke test exercises failed/successful CLI reload,
-generation increments, rejection of FIFO/device/logged policies without changing
+generation increments, rejection of FIFO/device policies without changing
 the generation, nonempty rule/set metadata at startup, metadata clearing after
 reload and HTTP/CLI snapshot agreement. Nonempty reload exceeded the one-second
-smoke deadline in CI on 72c7163; its timing acceptance remains unestablished. Live mixed-family
+smoke deadline in CI on 72c7163. PR #6 subsequently added verifier specialization
+and exercises nonempty CLI reloads in the firewall bench; worst-case timing
+remains open. Logged policies are now accepted with continuous event draining.
+Live mixed-family
 set edits and atomic unjail are exercised through the production map APIs by
 TestKernelProductionControl. TestKernelProductionMultipleLimits exercises two
 independent per-source inner maps through the production loader. These do not

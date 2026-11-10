@@ -92,6 +92,23 @@ func clonePolicy(p *config.Policy) *config.Policy {
 	}
 	return r
 }
+
+// LRU insertion reserves up to 128 free nodes per possible CPU. Those nodes
+// cannot hold source state, so max_entries == BucketSources may evict early
+// when packet processing migrates. Budget the reserve in both inner specs.
+// See docs.kernel.org/bpf/map_hash.html (LRU internals); capacity tests enforce
+// the usable minimum if a future kernel changes that implementation detail.
+func reserveBucketCapacity(spec *ebpf.CollectionSpec) error {
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		return err
+	}
+	entries := uint32(contract.BucketSources) + 128*uint32(cpus)
+	spec.Maps["bucket_template"].MaxEntries = entries
+	spec.Maps["buckets"].InnerMap.MaxEntries = entries
+	return nil
+}
+
 func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string]*ebpf.Map) (_ *ebpf.Collection, _ *config.Policy, err error) {
 	if policy == nil || policy.Config.RuleCount > contract.MaxRules {
 		return nil, nil, fmt.Errorf("invalid policy")
@@ -107,6 +124,20 @@ func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string
 	}
 	owned.Config = cfg
 	spec := p.spec.Copy()
+	if err := reserveBucketCapacity(spec); err != nil {
+		return nil, nil, err
+	}
+	// A callback's variable rule index hides individual frozen config fields
+	// from older verifiers. Explicit read-only feature unions let them prune
+	// paths absent from this generation without changing first-match semantics.
+	var actions, matches uint32
+	for _, r := range cfg.Rules[:cfg.RuleCount] {
+		actions |= 1 << r.Action
+		matches |= r.Matches
+	}
+	if err := spec.RewriteConstants(map[string]interface{}{"enabled_actions": actions, "enabled_matches": matches}); err != nil {
+		return nil, nil, err
+	}
 	spec.Maps["config"].Contents = []ebpf.MapKV{{Key: uint32(0), Value: cfg}}
 	// Freeze BEFORE program verification and forbid program-side config writes.
 	// The verifier can then prune disabled features/constant policy fields as
@@ -140,26 +171,46 @@ func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string
 		}
 	}()
 	var keys, fds []uint32
-	var inner []*ebpf.Map
+	for i, r := range cfg.Rules[:cfg.RuleCount] {
+		if r.Action == contract.Limit {
+			keys = append(keys, uint32(i))
+		}
+	}
+	inner := make([]*ebpf.Map, len(keys))
 	defer func() {
-		for _, m := range inner {
-			m.Close()
+		for i, m := range inner {
+			if i > 0 && m != nil {
+				m.Close()
+			}
 		}
 	}()
-	for i, r := range cfg.Rules[:cfg.RuleCount] {
-		if r.Action != contract.Limit {
-			continue
+	if len(keys) > 0 {
+		inner[0] = c.Maps["bucket_template"]
+		// Independent LRU maps are memory-heavy. Allocate private candidates on
+		// at most four workers, never parallelize mutation/publication itself.
+		jobs := make(chan int, len(keys))
+		for i := 1; i < len(keys); i++ {
+			jobs <- i
 		}
-		m := c.Maps["bucket_template"]
-		if len(keys) > 0 {
-			m, err = ebpf.NewMap(spec.Maps["buckets"].InnerMap)
-			if err != nil {
-				return nil, nil, err
+		close(jobs)
+		failures := make([]error, len(keys))
+		var workers sync.WaitGroup
+		for worker := 0; worker < 4; worker++ {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for i := range jobs {
+					inner[i], failures[i] = ebpf.NewMap(spec.Maps["buckets"].InnerMap.Copy())
+				}
+			}()
+		}
+		workers.Wait()
+		for i, m := range inner {
+			if failures[i] != nil {
+				return nil, nil, failures[i]
 			}
-			inner = append(inner, m)
+			fds = append(fds, uint32(m.FD()))
 		}
-		keys = append(keys, uint32(i))
-		fds = append(fds, uint32(m.FD()))
 	}
 	if len(keys) > 0 {
 		if _, err = c.Maps["buckets"].BatchUpdate(keys, fds, nil); err != nil {
@@ -279,6 +330,7 @@ func (p *Plane) Unjail(address netip.Addr) error {
 			return fmt.Errorf("address is not jailed")
 		case contract.UnjailRetry:
 			if time.Now().Before(deadline) {
+				time.Sleep(100 * time.Microsecond)
 				continue
 			}
 		}

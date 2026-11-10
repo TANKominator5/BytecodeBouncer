@@ -47,17 +47,9 @@ func (p *Plane) ReadState() (contract.State, error) {
 	if err != nil {
 		return s, err
 	}
-	var health []contract.Health
-	if err := p.collection.Maps["health"].Lookup(uint32(0), &health); err != nil {
+	s.Health, err = readHealth(p.collection.Maps["health"])
+	if err != nil {
 		return s, err
-	}
-	for _, v := range health {
-		s.Health.SourceFull += v.SourceFull
-		s.Health.JailFull += v.JailFull
-		s.Health.ScanFull += v.ScanFull
-		s.Health.BucketFailed += v.BucketFailed
-		s.Health.EventLost += v.EventLost
-		s.Health.ConfigMissing += v.ConfigMissing
 	}
 	for i, r := range p.policy.Config.Rules[:p.policy.Config.RuleCount] {
 		var values []contract.RuleCounters
@@ -93,10 +85,37 @@ func (p *Plane) ReadState() (contract.State, error) {
 			return s, err
 		}
 	}
-	cursor = ebpf.MapBatchCursor{}
+	jail, err := readJail(p.collection.Maps["jail"])
+	if err != nil {
+		return s, err
+	}
+	s.Jails, s.NowNS = jail.Jails, jail.NowNS
+	return s, nil
+}
+
+func readHealth(m *ebpf.Map) (contract.Health, error) {
+	var sum contract.Health
+	var health []contract.Health
+	if err := m.Lookup(uint32(0), &health); err != nil {
+		return contract.Health{}, err
+	}
+	for _, v := range health {
+		sum.SourceFull += v.SourceFull
+		sum.JailFull += v.JailFull
+		sum.ScanFull += v.ScanFull
+		sum.BucketFailed += v.BucketFailed
+		sum.EventLost += v.EventLost
+		sum.ConfigMissing += v.ConfigMissing
+	}
+	return sum, nil
+}
+func readJail(m *ebpf.Map) (contract.JailState, error) {
+	s := contract.JailState{Jails: []contract.JailRecord{}}
+	var cursor ebpf.MapBatchCursor
+	keys := make([]contract.Address, 1024)
 	jails := make([]contract.JailValue, 1024)
 	for {
-		n, err := p.collection.Maps["jail"].BatchLookup(&cursor, keys, jails, &ebpf.BatchOptions{ElemFlags: uint64(ebpf.LookupLock)})
+		n, err := m.BatchLookup(&cursor, keys, jails, &ebpf.BatchOptions{ElemFlags: uint64(ebpf.LookupLock)})
 		for i := 0; i < n; i++ {
 			if jails[i].Retired == 0 && jails[i].UntilNS > 0 {
 				s.Jails = append(s.Jails, contract.JailRecord{Src: keys[i], UntilNS: jails[i].UntilNS})
@@ -115,4 +134,21 @@ func (p *Plane) ReadState() (contract.State, error) {
 	}
 	s.NowNS = uint64(now.Nano())
 	return s, nil
+}
+
+func (p *Plane) ReadHealth() (contract.Health, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.closed {
+		return contract.Health{}, fmt.Errorf("dataplane closed")
+	}
+	return readHealth(p.collection.Maps["health"])
+}
+func (p *Plane) ReadJail() (contract.JailState, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.closed {
+		return contract.JailState{}, fmt.Errorf("dataplane closed")
+	}
+	return readJail(p.collection.Maps["jail"])
 }

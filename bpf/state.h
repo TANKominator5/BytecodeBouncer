@@ -50,7 +50,11 @@ static long reclaim_scan(void *map, const void *key, void *raw, void *context)
 static __always_inline void reclaim_state(__u32 kind, __u64 now,
                                           const struct tc_config *cfg)
 {
-    __u64 *busy = bpf_map_lookup_elem(&maintenance, &kind);
+    /* Keep the selector separate from the helper's address-taken key. Clang
+     * otherwise reloads kind after the helper and merges jail/scan iteration
+     * into one call site, which older verifiers reject as a poisoned map_ptr. */
+    __u32 key = kind;
+    __u64 *busy = bpf_map_lookup_elem(&maintenance, &key);
     if (!busy || __sync_val_compare_and_swap(busy, 0, 1)) return;
     struct reclaim_context gc = { .now = now };
     if (kind == 0) {

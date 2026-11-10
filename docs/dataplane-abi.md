@@ -3,7 +3,8 @@
 `include/contract.h` is the authoritative layout. Shared changes were authorized
 by the task owner; B/C review is still required before merge. A also adds kernel
 fixtures in `internal/dataplane/policy_test.go` and the header dependency in
-`Makefile`. CLI/config/reload/dashboard implementation remains with B/C.
+`Makefile`. B/C now integrate the runtime in their respective ownership areas;
+see [integration evidence](integration-validation.md) for current behavior.
 
 ## Publication and lifetime (Person B)
 
@@ -38,15 +39,15 @@ Other maps (`config`, `rule_counters`, `sets`, `buckets`, `scans`) belong to one
 generation. Scan windows and buckets restart on reload; jail/history do not.
 ABI v5 reuses the jail value's former reserved word as `retired` and adds
 `retired,reserved` before the scan generation plus a pending jail deadline (scan size 8,232; bitmap offset 40).
-Production Go mirrors live in `internal/contract/contract.go`; ELF/BTF layout
-tests check their encoding against the C authority without unsafe casts.
+`internal/contract/contract.go` supplies the production Go mirror and typed
+snapshot/event interfaces. Production loaders and kernel fixtures share it;
+encoding does not use unsafe casts.
 
 The zero-initialized config preserves the bootstrap default PASS, fragments DROP
 with no rules. This is **not a configuration publication API**: never write an
 attached program's config map in place. Production B code must explicitly set
-defaults and generation (starting at 1). The parser supports the complete kernel
-grammar; runtime loading rejects logged policies until continuous event
-consumption is integrated rather than silently losing events.
+defaults and generation (starting at 1). The production parser validates the
+whole file before a candidate is built and rejects unsupported/invalid syntax.
 
 ## Address sets
 
@@ -62,7 +63,10 @@ active generation's trie; they must not reset counters or increment generation.
 
 - `buckets` is ARRAY_OF_MAPS with 64 rule-index slots. Allocate an independent
   LRU_HASH using its inner template **only for each limit rule**; insert before
-  attaching. Each has 65,536 full-address entries. `bucket_template` is a concrete
+  attaching. Each guarantees at least 65,536 usable full-address entries: the Go
+  loader adds 128 slots per possible CPU for kernel LRU free-node reservations.
+  Apply the same capacity to the concrete template and outer-map inner spec.
+  `bucket_template` is a concrete
   map retaining the complete inner BTF schema; reuse it for the first limit rule
   (otherwise it is an unused allocated map). Populate the private outer map with
   one `BatchUpdate` of rule indices and uint32 map FDs, avoiding 64 individual

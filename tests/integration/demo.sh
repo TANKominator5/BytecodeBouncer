@@ -30,6 +30,9 @@ else:
     raise AssertionError('dashboard proxy did not become ready')
 with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=2) as r:
     assert json.load(r)['rules_version']==1
+for path in ('app.js','app.css','jail.json','log.json','health.json'):
+    with urllib.request.urlopen('http://127.0.0.1:8088/'+path,timeout=2) as r:
+        assert r.status==200
 print('PASS: host browser proxy reaches demo page and stats')
 PY
 # Stop must work while the foreground proxy is still running (no inherited lock).
