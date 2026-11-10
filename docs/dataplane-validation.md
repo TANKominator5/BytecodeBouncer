@@ -153,3 +153,12 @@ bootstrap/demo integration, race tests and vet passed. Wire replacement carried
 shared jail subprogram was around 0.69–1.22 seconds across local runs (including
 parallel load). Therefore the target one-second end-to-end CLI reload deadline
 is explicitly not established and requires optimization/measurement in B's work.
+
+Shared Go handoff follow-up: internal/contract/contract.go now provides the actual
+production ABI mirrors, constants, typed JSON records and B/C interfaces. Counter
+snapshots and ELF/BTF/kernel fixtures consume those same types. Jail lock branches
+now return early instead of carrying correlated boolean states through retries;
+local verifier work dropped to 192,723 instructions (about 216 ms focused, 389 ms
+under concurrent wire load). All local parser/race/vet/kernel/wire/bootstrap/demo
+checks passed. Earlier GitHub checks timed out during startup; the updated head
+must pass CI before merge. Target Linux 6.8 and full CLI reload timing remain open.

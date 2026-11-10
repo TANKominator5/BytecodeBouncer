@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
@@ -29,63 +30,25 @@ import (
 )
 
 const (
-	drop       = 1
-	pass       = 2
-	bounce     = 3
-	honeypot   = 4
-	limit      = 5
-	jailAction = 6
+	drop       = contract.Drop
+	pass       = contract.Pass
+	bounce     = contract.Bounce
+	honeypot   = contract.Honeypot
+	limit      = contract.Limit
+	jailAction = contract.Jail
 )
 
-type testAddress struct {
-	Bytes    [16]byte
-	Family   uint8
-	Reserved [7]byte
-}
-type testPrefix struct {
-	Bytes        [16]byte
-	Family, Bits uint8
-	Reserved     [2]byte
-}
-type testRule struct {
-	Line, Matches, Action, Rate, Burst, JailSeconds uint32
-	Src, Dst                                        testPrefix
-	SportMin, SportMax, DportMin, DportMax, VLAN    uint16
-	Family, Proto, ICMPType, SrcSet, DstSet, Log    uint8
-}
-type testConfig struct {
-	Generation                                                uint64
-	RuleCount, DefaultAction, FragmentAction, HoneypotIfindex uint32
-	ScanPorts, ScanWindowSeconds, ScanJailSeconds, Reserved   uint32
-	Rules                                                     [64]testRule
-}
-type testSetKey struct {
-	PrefixLen   uint32
-	Set, Family uint8
-	Reserved    [2]byte
-	Bytes       [16]byte
-}
-type testRuleCounters struct{ Hits, Passed, Dropped, Bounced, Honeypotted uint64 }
-type testHealth struct{ SourceFull, JailFull, ScanFull, BucketFailed, EventLost, ConfigMissing uint64 }
-type testJail struct {
-	Lock, Retired        uint32
-	UntilNS, CancelledNS uint64
-}
-type testBucket struct{ NextNS uint64 }
-type testScan struct {
-	Lock, Count                         uint32
-	Retired, Reserved                   uint32
-	Generation, StartNS, PendingUntilNS uint64
-	Ports                               [1024]uint64
-}
-type testEvent struct {
-	TimeNS, Generation uint64
-	Line, Verdict      uint32
-	Src, Dst           testAddress
-	Sport, Dport       uint16
-	Proto, HasPorts    uint8
-	Reserved           [2]byte
-}
+type testAddress = contract.Address
+type testPrefix = contract.Prefix
+type testRuleCounters = contract.RuleCounters
+type testRule = contract.Rule
+type testConfig = contract.Config
+type testSetKey = contract.SetKey
+type testHealth = contract.Health
+type testJail = contract.JailValue
+type testBucket = contract.BucketValue
+type testScan = contract.ScanValue
+type testEvent = contract.EventRecord
 
 func TestPolicyABI(t *testing.T) {
 	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(object))
@@ -1310,10 +1273,7 @@ func TestKernelPendingScanJail(t *testing.T) {
 
 func TestKernelAtomicUnjail(t *testing.T) {
 	c := loadPolicySized(t, cfg(testRule{Action: jailAction, JailSeconds: 60, Matches: 32, DportMin: 9, DportMax: 9}), nil, 2)
-	type request struct {
-		Src              testAddress
-		Result, Reserved uint32
-	}
+	type request = contract.UnjailRequest
 	command := func(src testAddress) uint32 {
 		t.Helper()
 		if err := c.Maps["unjail_request"].Put(uint32(0), request{Src: src}); err != nil {
@@ -1419,10 +1379,7 @@ func TestKernelUnjailCancelsPendingScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	runPacket(t, c, ipv4("192.0.2.1", 1, 0, 5, make([]byte, 8)), drop)
-	type request struct {
-		Src              testAddress
-		Result, Reserved uint32
-	}
+	type request = contract.UnjailRequest
 	if err := c.Maps["unjail_request"].Put(uint32(0), request{Src: src}); err != nil {
 		t.Fatal(err)
 	}

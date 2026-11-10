@@ -3,7 +3,8 @@
 ## Goal and scope
 Build the trafficcop firewall defined in [problem_Statement.md](problem_Statement.md).
 Read [architecture.md](architecture.md) and [docs/spec-checklist.md](docs/spec-checklist.md)
-before implementation. The bootstrap is pass-through, not a completed firewall.
+before implementation. The CLI accepts bootstrap rules only; the kernel
+dataplane is broader, but this is not yet a completed integrated firewall.
 Do not silently accept configuration that the dataplane does not enforce.
 
 ## Build simply
@@ -27,6 +28,28 @@ Do not silently accept configuration that the dataplane does not enforce.
 - Coordinate `include/contract.h`, build/dependency files, architecture changes
   and pipeline changes before editing them. Cross-owner changes must be called
   out in the PR; do not block necessary fixes behind artificial boundaries.
+
+## Shared Go contract (required for parallel B/C work)
+- Use `internal/contract/contract.go` for action/match constants, binary rule/map/
+  event layouts, typed stats/jail/log JSON records, and B/C interfaces. Do not
+  create private duplicate schemas, `[]any` payloads, or new mutable global state.
+- `include/contract.h` remains the C ABI authority. A/B coordinate both files;
+  update the existing ELF/BTF layout tests and ABI version when layouts change.
+- B owns parsing, validated Config/Rule construction, map/link lifecycle and
+  live commands. Raw contract structs do not validate grammar or reserved bytes.
+  B provides CounterReader and the EventReader stream; Close must unblock reads.
+- C owns telemetry aggregation, canonical address/verdict formatting, event
+  draining/history and HTTP. Implement Telemetry for Stats/Jail/Log snapshots;
+  B routes CLI commands to those same methods. The daemon owns component startup
+  and shutdown. Never let an HTTP client block the event drain.
+- Snapshots must be safe for concurrent CLI/HTTP use and detached from mutable
+  storage. Empty collections encode as []; absent event ports encode as null.
+  Preserve exact spec ordering and JSON fields. Internal binary structs are not
+  public JSON and must not be serialized as stats or logs.
+- Until full providers are implemented, keep unsupported commands explicit.
+  The existing observe snapshot consumes CounterReader so C can use a fake
+  without waiting for B. Treat new interface methods as coordinated changes,
+  not independent extensions on each branch.
 
 ## Workflow and verification
 - Branch from current origin/main, one branch per issue. No direct main pushes

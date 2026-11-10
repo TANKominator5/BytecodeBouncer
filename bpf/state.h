@@ -107,11 +107,17 @@ static __noinline int jail_source(const struct tc_address *src, __u64 decided, _
         }
         if (!value) continue;
         bpf_spin_lock(&value->lock);
-        int retired = value->retired;
-        int cancelled = value->cancelled_ns && decided <= value->cancelled_ns;
-        if (!retired && !cancelled && until > value->until_ns) value->until_ns = until;
+        if (value->retired) {
+            bpf_spin_unlock(&value->lock);
+            continue;
+        }
+        if (value->cancelled_ns && decided <= value->cancelled_ns) {
+            bpf_spin_unlock(&value->lock);
+            return -1;
+        }
+        if (until > value->until_ns) value->until_ns = until;
         bpf_spin_unlock(&value->lock);
-        if (!retired) return cancelled ? -1 : 1;
+        return 1;
     }
     if (h) h->jail_full++;
     return 0;

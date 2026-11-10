@@ -114,3 +114,13 @@ Unjail uses a separate, never-attached XDP control program invoked by test-run;
 it checks retirement and clears release time under one lock, rather than a
 userspace read/modify/write. Scan threshold decisions remain pending across jail
 allocation contention and are retried even on repeated destination ports.
+
+## Shared Go boundary
+
+`internal/contract/contract.go` mirrors the C ABI and owns typed public JSON.
+Dataplane counters and kernel-test fixtures use these production types, with
+ELF/BTF tests checking their layout. Observe consumes CounterReader rather than
+concrete dataplane.Plane. B supplies decoded EventReader records and map/control
+operations; C owns Telemetry snapshots/history. The daemon wires their lifecycle
+and invokes the same snapshot API for CLI and HTTP. Target interfaces are a
+handoff contract; they do not imply pending commands are implemented.

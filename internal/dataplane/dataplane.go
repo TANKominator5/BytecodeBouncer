@@ -5,6 +5,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
@@ -16,7 +17,10 @@ import (
 var object []byte
 
 // Counters must match include/contract.h; fields are native-endian uint64.
-type Counters struct{ Passed, Dropped, Bounced, Honeypotted, Malformed, Other, Jailed, DefaultHits uint64 }
+type Counters = contract.Counters
+
+var _ contract.CounterReader = (*Plane)(nil)
+
 type Plane struct {
 	mu         sync.RWMutex
 	closed     bool
