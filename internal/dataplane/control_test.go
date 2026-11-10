@@ -28,9 +28,9 @@ func productionPlane(t *testing.T, input string) *Plane {
 		t.Fatal(err)
 	}
 	p := &Plane{spec: spec, version: 1}
-	start:=time.Now()
+	start := time.Now()
 	p.collection, p.policy, err = p.prepare(policy, 1, nil)
-	t.Logf("production generation preparation: %s",time.Since(start))
+	t.Logf("production generation preparation: %s", time.Since(start))
 	if err != nil {
 		t.Fatalf("prepare: %+v", err)
 	}
