@@ -30,7 +30,7 @@ run ./trafficcop start eth0 tests/fixtures/bootstrap.rules
 started=1
 (( SECONDS < 5 ))
 run python3 - <<'PY'
-import json,socket,subprocess,time,urllib.request
+import json,os,socket,subprocess,tempfile,time,urllib.request
 binary='./trafficcop'
 def call(*args): return subprocess.run([binary,*args],capture_output=True,text=True,timeout=1)
 assert call('start','eth0','tests/fixtures/bootstrap.rules').returncode==1
@@ -50,7 +50,13 @@ assert web['passed']>=after['passed']
 with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'BYTECODE' in r.read()
 assert call('reload','/nonexistent/trafficcop.rules').returncode==1
 assert call('reload','tests/fixtures/bootstrap.rules').returncode==0
-assert call('stats').returncode==0
+version=json.loads(call('stats').stdout)['rules_version']
+with tempfile.TemporaryDirectory() as directory:
+    fifo=os.path.join(directory,'rules.fifo');os.mkfifo(fifo)
+    for path in (fifo,'/dev/zero','/dev/tty'):
+        assert call('reload',path).returncode==1,path
+        assert json.loads(call('stats').stdout)['rules_version']==version
+# The shell's stop below also verifies rejected reads leave shutdown responsive.
 print('PASS: real XDP counters, singleton, HTTP, failed/successful reload')
 PY
 SECONDS=0

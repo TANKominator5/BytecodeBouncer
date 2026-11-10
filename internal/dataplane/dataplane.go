@@ -92,6 +92,23 @@ func clonePolicy(p *config.Policy) *config.Policy {
 	}
 	return r
 }
+
+// LRU insertion reserves up to 128 free nodes per possible CPU. Those nodes
+// cannot hold source state, so max_entries == BucketSources may evict early
+// when packet processing migrates. Budget the reserve in both inner specs.
+// See docs.kernel.org/bpf/map_hash.html (LRU internals); capacity tests enforce
+// the usable minimum if a future kernel changes that implementation detail.
+func reserveBucketCapacity(spec *ebpf.CollectionSpec) error {
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		return err
+	}
+	entries := uint32(contract.BucketSources) + 128*uint32(cpus)
+	spec.Maps["bucket_template"].MaxEntries = entries
+	spec.Maps["buckets"].InnerMap.MaxEntries = entries
+	return nil
+}
+
 func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string]*ebpf.Map) (_ *ebpf.Collection, _ *config.Policy, err error) {
 	if policy == nil || policy.Config.RuleCount > contract.MaxRules {
 		return nil, nil, fmt.Errorf("invalid policy")
@@ -107,6 +124,9 @@ func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string
 	}
 	owned.Config = cfg
 	spec := p.spec.Copy()
+	if err := reserveBucketCapacity(spec); err != nil {
+		return nil, nil, err
+	}
 	// A callback's variable rule index hides individual frozen config fields
 	// from older verifiers. Explicit read-only feature unions let them prune
 	// paths absent from this generation without changing first-match semantics.

@@ -9,6 +9,7 @@ acceptance. See [integration validation](integration-validation.md) and
 - [x] Singleton lock, private CLI socket, failed-start resource cleanup.
 - [x] Per-CPU packet counters, shared stats JSON and live dashboard.
 - [x] Reject unsupported config/commands instead of silently pretending support.
+  - [x] Reject blocking special policy files; bound runtime input to 16 MiB.
 - [x] Complete strict rules grammar, forward sets, normalized prefixes, limits.
 - [x] Ethernet/VLAN/IPv4/options/fragments/malformed and complete IPv6 parsing.
 - [x] Kernel first-match engine, all matches, fragment/default semantics, line numbers.

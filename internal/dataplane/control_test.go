@@ -218,3 +218,27 @@ func TestKernelProductionSpecializedMatches(t *testing.T) {
 		})
 	}
 }
+
+func TestKernelProductionBucketCapacity(t *testing.T) {
+	p := productionPlane(t, "limit 1/s burst 1 proto udp dport 10\nlimit 1/s burst 1 proto udp dport 11\n")
+	for index := uint32(0); index < 2; index++ {
+		var m *ebpf.Map
+		if err := p.collection.Maps["buckets"].Lookup(index, &m); err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		keys := make([]testAddress, contract.BucketSources)
+		values := make([]testBucket, len(keys))
+		for i := range keys {
+			keys[i] = testAddress{Family: 4, Bytes: [16]byte{10, byte(index), byte(i >> 8), byte(i)}}
+			values[i] = testBucket{NextNS: monotonicNS(t) + 1_000_000_000_000_000}
+		}
+		populateBucketAcrossCPUs(t, m, keys, values)
+		for _, key := range keys {
+			var value testBucket
+			if err := m.Lookup(key, &value); err != nil {
+				t.Fatalf("rule %d lost source %+v: %v", index, key, err)
+			}
+		}
+	}
+}

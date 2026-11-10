@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
+	"golang.org/x/sys/unix"
 )
 
 type Set struct {
@@ -25,13 +26,41 @@ type Policy struct {
 }
 
 func Validate(path string) error { _, err := Parse(path, false); return err }
+
+// Parse loads a finite runtime policy without opening blocking special files.
 func Parse(path string, honeypot bool) (*Policy, error) {
-	f, err := os.Open(path)
+	// O_PATH inspects the inode without invoking device open handlers. Reopen
+	// the validated descriptor through procfs so path swaps cannot bypass this.
+	fd, err := unix.Open(path, unix.O_PATH|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	handle := os.NewFile(uintptr(fd), path)
+	defer handle.Close()
+	info, err := handle.Stat()
+	if err != nil {
+		return nil, err
+	}
+	null, err := os.Stat("/dev/null")
+	if !info.Mode().IsRegular() && (err != nil || !os.SameFile(info, null)) {
+		return nil, fmt.Errorf("rules file must be a regular file or /dev/null")
+	}
+	f, err := os.OpenFile(fmt.Sprintf("/proc/self/fd/%d", fd), os.O_RDONLY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return ParseReader(f, honeypot)
+	// Bound total work even when a regular file is being appended concurrently.
+	const maxBytes = 16 << 20
+	input := &io.LimitedReader{R: f, N: maxBytes + 1}
+	policy, err := ParseReader(input, honeypot)
+	if input.N == 0 {
+		return nil, fmt.Errorf("rules file exceeds 16 MiB")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return policy, nil
 }
 
 // Prefix accepts a single address or a normalized mixed-family CIDR. IPv4-mapped

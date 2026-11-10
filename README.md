@@ -100,6 +100,11 @@ and `/log.json` expose those same command snapshots; `/health.json` separately
 reports allocation/ring/stream failures without altering the required stats
 schema. A dedicated goroutine drains events and retains exactly the newest
 1,000 oldest-first; logged decisions are never synthesized in userspace.
+A temporary log snapshot timeout is recoverable: later requests wait for the
+outstanding flush barrier before issuing a new one. Terminal stream errors stay
+visible through diagnostics. Runtime policy files must be regular files or
+`/dev/null`, at most 16 MiB including comments; FIFOs/devices are rejected before
+opening for reads. The grammar reader remains available for in-memory tests.
 Finite state limits and target-platform gaps are documented in
 [integration validation](docs/integration-validation.md).
 
@@ -121,7 +126,7 @@ sudo bash bpf/netns-test.sh     # private veth wire actions/replacement under lo
 ```
 
 The XDP implementation supports all rule conditions and actions, mixed-family
-sets, independent 65,536-source limit maps, jail/scans and logged decisions.
+sets, independent limit maps with at least 65,536 usable source entries each, jail/scans and logged decisions.
 See [ABI and B/C handoff](docs/dataplane-abi.md) and
 [actual validation/limitations](docs/dataplane-validation.md). The ABI includes
 explicit diagnostic counters for finite map capacity and event-ring failures.

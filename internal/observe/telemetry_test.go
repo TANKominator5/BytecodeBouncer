@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
 )
@@ -193,5 +194,49 @@ func TestEventFailureVisible(t *testing.T) {
 	d, err := s.Diagnostics()
 	if err != nil || d.StreamError == "" {
 		t.Fatal(d, err)
+	}
+}
+
+// Allows the test to deliver each flush acknowledgment independently.
+type delayedStream struct {
+	*fakeStream
+	flushes chan struct{}
+}
+
+func (f *delayedStream) Flush() error { f.flushes <- struct{}{}; return nil }
+func TestEventBarrierTimeoutRecovers(t *testing.T) {
+	f := &delayedStream{fakeStream: newFakeStream(), flushes: make(chan struct{}, 2)}
+	s := New(&fakeState{}, f)
+	defer s.Close()
+	type logResult struct {
+		events []contract.Event
+		err    error
+	}
+	result := make(chan logResult, 1)
+	go func() { events, err := s.Log(); result <- logResult{events, err} }()
+	<-f.flushes
+	if first := <-result; first.err == nil || !strings.Contains(first.err.Error(), "timed out") {
+		t.Fatal(first.err)
+	}
+	diagnostics, err := s.Diagnostics()
+	if err != nil || diagnostics.StreamError != "" {
+		t.Fatalf("timeout poisoned stream: %+v %v", diagnostics, err)
+	}
+	// A retry must first consume the old acknowledgment, then flush again.
+	go func() { events, err := s.Log(); result <- logResult{events, err} }()
+	f.queue <- streamMessage{err: contract.ErrEventsFlushed}
+	select {
+	case <-f.flushes:
+	case <-time.After(time.Second):
+		t.Fatal("retry did not flush")
+	}
+	f.queue <- streamMessage{record: contract.EventRecord{Line: 42, Verdict: contract.Pass, Src: rawAddress("192.0.2.1"), Dst: rawAddress("192.0.2.2"), Proto: 17}}
+	f.queue <- streamMessage{err: contract.ErrEventsFlushed}
+	retry := <-result
+	if retry.err != nil {
+		t.Fatal(retry.err)
+	}
+	if len(retry.events) != 1 || retry.events[0].Line != 42 {
+		t.Fatal("retry returned before new barrier was drained")
 	}
 }

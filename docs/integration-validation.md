@@ -172,3 +172,33 @@ The demo/namespace/proxy were stopped after capture.
 - Need target Ubuntu/Linux 6.8 build/runtime, repeated long-run reclaim/memory
   stress, all worst-capacity CLI timing and final flood benchmark before claiming
   full issue acceptance. CI configuration is updated, not presumed to have run.
+
+## PR review regressions
+
+Runtime policy loading inspects an O_PATH descriptor before opening for reads,
+then reopens the same inode through procfs. Only regular files and `/dev/null`
+are accepted, with a 16 MiB total-input limit. Unit tests cover devices, FIFOs,
+exact size boundaries and accepted logging policies. Namespace smoke tests reject
+FIFO/device reloads, confirm generation preservation and stats responsiveness,
+then stop normally. This is a cross-owner config/bench fix with no ABI change.
+
+Log request timeouts no longer become terminal stream errors. An outstanding
+flush barrier survives its request timeout; the next request must retire that
+barrier before issuing another. A delayed-acknowledgment unit test verifies
+recovery and that old acknowledgments cannot satisfy a new snapshot early.
+Terminal read/flush errors remain visible in diagnostics.
+
+The initially intermittent kernel capacity failure was reproduced with a captured
+log: rule 1 retained only 65,408 of 65,536 inserted sources. Kernel global LRU maps
+reserve up to 128 free nodes per possible CPU; CPU migration can therefore cause
+early eviction when max_entries is exactly the required usable capacity. The
+loader now budgets 65,536 + 128 * possible_CPUs in both inner-map specifications.
+The ELF baseline and binary layouts remain unchanged; allocated capacity/memory
+increase by that reserve for each limit map. See Linux kernel map_hash LRU
+internals (https://docs.kernel.org/bpf/map_hash.html#internals). A deterministic
+cross-CPU population test checks all 65,536 keys in two production rule maps;
+the existing 64-map capacity test uses the same migration pattern. Both passed
+three consecutive focused runs after the fix. A scratch raw-map control without
+the reserve lost exactly 128 keys on all three runs using the same off-batch CPU
+switch; it was removed after diagnosis. This is a cross-owner dataplane
+and kernel-fixture correction, not a relaxed retention assertion.

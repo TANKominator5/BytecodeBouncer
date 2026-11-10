@@ -2,7 +2,10 @@ package config
 
 import (
 	"fmt"
+	"golang.org/x/sys/unix"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -127,5 +130,41 @@ func TestBinaryAddresses(t *testing.T) {
 func TestLongValidComment(t *testing.T) {
 	if _, err := ParseReader(strings.NewReader("#"+strings.Repeat("x", 3<<20)+"\npass"), false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRuntimePolicyFiles(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "fifo")
+	if err := unix.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{fifo, "/dev/zero", "/dev/tty", dir} {
+		if _, err := Parse(path, false); err == nil {
+			t.Fatalf("accepted special file %s", path)
+		}
+	}
+	if _, err := Parse("/dev/null", false); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rules")
+	for _, tc := range []struct {
+		size  int
+		valid bool
+	}{{16 << 20, true}, {(16 << 20) + 1, false}} {
+		if err := os.WriteFile(path, []byte("#"+strings.Repeat("x", tc.size-1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Parse(path, false)
+		if (err == nil) != tc.valid {
+			t.Fatalf("size %d: %v", tc.size, err)
+		}
+	}
+	if err := os.WriteFile(path, []byte("pass log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Parse(path, false)
+	if err != nil || p.Config.Rules[0].Log != 1 {
+		t.Fatalf("logging policy: %+v %v", p, err)
 	}
 }

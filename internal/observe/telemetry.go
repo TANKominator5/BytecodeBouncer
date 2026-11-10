@@ -156,6 +156,21 @@ func copyEvent(e contract.Event) contract.Event {
 func (s *Service) Log() ([]contract.Event, error) {
 	s.flushMu.Lock()
 	defer s.flushMu.Unlock()
+	timer := time.NewTimer(700 * time.Millisecond)
+	defer timer.Stop()
+	// A timed-out request leaves its barrier outstanding. Retire it before
+	// issuing another flush, so a late acknowledgment cannot satisfy a newer
+	// request whose events have not yet been drained.
+	s.mu.Lock()
+	pending := s.wait
+	s.mu.Unlock()
+	if pending != nil {
+		select {
+		case <-pending:
+		case <-timer.C:
+			return nil, fmt.Errorf("event drain barrier timed out")
+		}
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -178,19 +193,13 @@ func (s *Service) Log() ([]contract.Event, error) {
 		s.mu.Unlock()
 		return nil, err
 	}
-	timer := time.NewTimer(700 * time.Millisecond)
-	defer timer.Stop()
 	select {
 	case <-wait:
 	case <-timer.C:
-		s.mu.Lock()
-		if s.wait == wait {
-			s.wait = nil
-		}
-		err := fmt.Errorf("event drain barrier timed out")
-		s.streamError = err
-		s.mu.Unlock()
-		return nil, err
+		// This request timed out, but the stream may still be healthy. Keep
+		// s.wait until the drain acknowledges it; terminal read errors are
+		// recorded by drain and remain visible to subsequent calls.
+		return nil, fmt.Errorf("event drain barrier timed out")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
