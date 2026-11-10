@@ -38,14 +38,15 @@ Other maps (`config`, `rule_counters`, `sets`, `buckets`, `scans`) belong to one
 generation. Scan windows and buckets restart on reload; jail/history do not.
 ABI v5 reuses the jail value's former reserved word as `retired` and adds
 `retired,reserved` before the scan generation plus a pending jail deadline (scan size 8,232; bitmap offset 40).
-No userspace Go mirror is shipped as production code until B integrates it;
-the typed fixtures demonstrate encoding without unsafe casts.
+Production Go mirrors live in `internal/contract/contract.go`; ELF/BTF layout
+tests check their encoding against the C authority without unsafe casts.
 
 The zero-initialized config preserves the bootstrap default PASS, fragments DROP
 with no rules. This is **not a configuration publication API**: never write an
 attached program's config map in place. Production B code must explicitly set
-defaults and generation (starting at 1). The bootstrap parser still rejects all
-unsupported rule syntax rather than silently accepting unenforced policy.
+defaults and generation (starting at 1). The parser supports the complete kernel
+grammar; runtime loading rejects logged policies until continuous event
+consumption is integrated rather than silently losing events.
 
 ## Address sets
 
