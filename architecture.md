@@ -13,13 +13,16 @@ host-wide singleton. The socket is mode 0600; an advisory lock serializes startu
 No maps need pinning while the daemon owns their descriptors. If future recovery
 requires pins, use only an owned subtree and clean it on every failure/stop.
 
-## Bootstrap implementation
+## Current implementation
 - `start <ifname> <rulesfile>` accepts comments, blank lines, and at most one
   `default pass`; unsupported syntax is rejected with its original line number.
 - A child daemon reports readiness only after HTTP/socket bind and native XDP
   attachment. An existing attachment is not force-replaced.
-- XDP passes every packet and maintains per-CPU pass/other/default counters.
-  VLAN/IP parsing is unfinished; these are bootstrap counters only.
+- XDP implements parsing, first-match policy, sets, per-rule/source buckets,
+  jail/scans, bounce/redirect, counters and event production. The bootstrap CLI
+  still publishes only an empty/default-pass configuration; other syntax stays
+  rejected until Person B integrates the loader. Malformed IP drops and
+  non-first-fragment fallback apply even with no rules.
 - `stats`, `/stats.json`, dashboard polling, `stop`, signal cleanup and restart
   work. All other commands explicitly fail until implemented.
 - The binary embeds the built ELF. No Go bindings generator is required yet;
@@ -43,11 +46,19 @@ logging use a common verdict-finalization path so each packet is counted once.
 `include/contract.h` is authoritative for native-endian map fields and
 network-order address bytes. Reserved bytes must be zero. Use fixed-width types,
 explicit padding, C static assertions and Go ELF/layout tests. Rule indices and
-original file line numbers are separate concepts. Event ABI and rule/map schemas
-must be coordinated by A/B/C before their implementation; placeholders are not
-being frozen prematurely.
+original file line numbers are separate concepts. ABI v5 and its integration
+protocol are documented in [docs/dataplane-abi.md](docs/dataplane-abi.md). The task
+owner authorized this shared change; B/C review remains required before merge.
 
-## Reload gate: still to implement and prove
+## Reload publication: mechanism selected, CLI integration pending
+Each immutable config map belongs to one loaded program generation. Build and
+freeze a complete candidate, reuse persistent maps, then update the existing XDP
+bpf_link program. Program/map references live through outstanding invocations;
+kernel RCU reclaims retired programs after descriptors close. This avoids both
+mutable/reusable config slots and an unbounded list of retained generations.
+The isolated wire test exercises five replacements under traffic, not the CLI
+reload or its one-second worst-case timing on Linux 6.8.
+
 A complete candidate is parsed and validated before active state changes. A
 packet must select one complete immutable configuration, including rules and set
 references. Publish one selector only after all candidate objects are ready.
@@ -89,3 +100,27 @@ if possible. Event saturation, source-count capacity and reload reclamation
 need explicit limits/tests. No model-proposed memory or throughput estimate is
 a measured result. The target remains Ubuntu 24.04, Linux 6.8, x86-64, 4 CPUs;
 ARM64-host testing does not replace that validation.
+
+## Expired-state recovery
+
+Jail and scan maps reclaim expired entries on insertion pressure. A shared
+maintenance map serializes collectors; locked retirement markers prevent a
+concurrent writer from reviving a value after deletion. Share maintenance with
+jail across program replacements. Active state is never evicted. Scan allocation
+failures drop the current packet with diagnostics instead of bypassing detection.
+See the ABI handoff for finite-capacity and pressure-path performance limits.
+
+Unjail uses a separate, never-attached XDP control program invoked by test-run;
+it checks retirement and clears release time under one lock, rather than a
+userspace read/modify/write. Scan threshold decisions remain pending across jail
+allocation contention and are retried even on repeated destination ports.
+
+## Shared Go boundary
+
+`internal/contract/contract.go` mirrors the C ABI and owns typed public JSON.
+Dataplane counters and kernel-test fixtures use these production types, with
+ELF/BTF tests checking their layout. Observe consumes CounterReader rather than
+concrete dataplane.Plane. B supplies decoded EventReader records and map/control
+operations; C owns Telemetry snapshots/history. The daemon wires their lifecycle
+and invokes the same snapshot API for CLI and HTTP. Target interfaces are a
+handoff contract; they do not imply pending commands are implemented.

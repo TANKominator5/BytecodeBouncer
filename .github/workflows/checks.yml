@@ -16,3 +16,4 @@ jobs:
       - run: make test
       - run: sudo tests/integration/bootstrap.sh
       - run: sudo tests/integration/demo.sh
+      - run: sudo env "PATH=$PATH" bash bpf/test.sh --kernel

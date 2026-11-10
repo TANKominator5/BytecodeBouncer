@@ -3,13 +3,14 @@ package observe
 import (
 	"encoding/json"
 	"errors"
+	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
 	"net/http/httptest"
 	"testing"
 )
 
 func TestStatsEndpoint(t *testing.T) {
 	h := Handler(func() (Stats, error) {
-		return Stats{Passed: 42, Rules: []any{}, Sets: []any{}, TopSources: []any{}}, nil
+		return Stats{Passed: 42, Rules: []contract.RuleStats{}, Sets: []contract.SetStats{}, TopSources: []contract.SourceStats{}}, nil
 	})
 	r := httptest.NewRecorder()
 	h.ServeHTTP(r, httptest.NewRequest("GET", "/stats.json", nil))

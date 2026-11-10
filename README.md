@@ -1,8 +1,9 @@
 # BytecodeBouncer / trafficcop
 
-Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. **This commit is a
-working pass-through bootstrap, not the complete firewall.** Do not deploy it
-expecting filtering. Deadline: 13 November 2026, 11:59 p.m. IST.
+Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. **Person A's kernel
+dataplane is implemented; the CLI still accepts only bootstrap configuration.**
+This is not yet the complete, integrated firewall. Deadline: 13 November 2026,
+11:59 p.m. IST.
 
 Read [problem statement](problem_Statement.md), [architecture](architecture.md),
 [contributor instructions](AGENTS.md), and [implementation checklist](docs/spec-checklist.md).
@@ -66,7 +67,25 @@ still operates on an existing interface as the grading harness requires.
 Only blank lines, comments and one optional `default pass` are accepted. `reload`,
 `set`, `jail`, `unjail`, `log`, filtering and the honeypot argument are explicitly
 unsupported. Counters for unfinished features are zero and record arrays empty.
-VLAN/IP parsing and exact final-spec classification are still open work.
+The kernel now parses Ethernet/VLAN/IPv4/options/fragments/IPv6 extensions and
+classifies malformed frames correctly. With bootstrap configuration, valid IP
+passes except unmatched non-first fragments, which drop. Policy-rule loading
+and live commands still need Person B's integration; stats panels/event history
+need Person C's integration. Do not assume the CLI enables those features yet.
+
+### Person A dataplane tests and handoff
+
+```sh
+bash bpf/test.sh                # exact short parser fixtures, ASan/UBSan
+sudo bash bpf/test.sh --kernel  # actual BPF packet/state/ABI/four-CPU tests
+sudo bash bpf/netns-test.sh     # private veth wire actions/replacement under load
+```
+
+The XDP implementation supports all rule conditions and actions, mixed-family
+sets, independent 65,536-source limit maps, jail/scans and logged decisions.
+See [ABI and B/C handoff](docs/dataplane-abi.md) and
+[actual validation/limitations](docs/dataplane-validation.md). The ABI includes
+explicit diagnostic counters for finite map capacity and event-ring failures.
 
 The daemon reports readiness through a pipe, owns an exclusive lock and private
 Unix socket under `/run/trafficcop`, and embeds its web assets. No BPF maps are
