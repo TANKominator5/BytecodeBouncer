@@ -9,7 +9,7 @@ kernel items do not imply CLI integration or Linux 6.8 acceptance; see
 - [x] Singleton lock, private CLI socket, failed-start resource cleanup.
 - [x] Per-CPU packet counters, shared stats JSON and live dashboard scaffold.
 - [x] Reject unsupported config/commands instead of silently pretending support.
-- [ ] Complete strict rules grammar, forward sets, normalized prefixes, limits.
+- [x] Complete strict rules grammar, forward sets, normalized prefixes, limits.
 - [x] Ethernet/VLAN/IPv4/options/fragments/malformed and complete IPv6 parsing.
 - [x] Kernel first-match engine, all matches, fragment/default semantics, line numbers.
 - [x] Independent per-rule/per-source token buckets and capacity tests (WSL kernel).

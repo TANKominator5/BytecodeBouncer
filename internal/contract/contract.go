@@ -92,12 +92,46 @@ type UnjailRequest struct {
 // CounterReader is implemented by dataplane.Plane; C can test against a fake.
 type CounterReader interface{ Counters() (Counters, error) }
 
+// State is a detached, generation-consistent B-to-C map snapshot, not public JSON.
+// B reads native map records; C owns address formatting, ordering and aggregation.
+type SourceCount struct {
+	Src     Address
+	Packets uint64
+}
+type JailRecord struct {
+	Src     Address
+	UntilNS uint64
+}
+type RuleSample struct {
+	Line     uint32
+	Counters RuleCounters
+}
+type State struct {
+	Generation, NowNS uint64
+	Counters          Counters
+	Health            Health
+	Rules             []RuleSample
+	Sets              []SetStats
+	Sources           []SourceCount
+	Jails             []JailRecord
+}
+type StateReader interface{ ReadState() (State, error) }
+
 // EventReader is the B-to-C stream boundary. B decodes ABI records; C drains
 // continuously and owns the last-1000 history. Close must unblock ReadEvent.
 type EventReader interface {
 	ReadEvent() (EventRecord, error)
+	// Flush interrupts an empty read; pending records precede ErrEventsFlushed.
+	// C uses this barrier for an up-to-date log snapshot without timing sleeps.
+	Flush() error
 	Close() error
 }
+
+type StreamError string
+
+func (e StreamError) Error() string { return string(e) }
+
+const ErrEventsFlushed StreamError = "event stream flushed"
 
 // Telemetry is the target B/C daemon boundary, not a claim that pending CLI
 // features are implemented. B connects commands; C owns snapshots and history.

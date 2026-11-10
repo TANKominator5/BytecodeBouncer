@@ -1,7 +1,7 @@
 # BytecodeBouncer / trafficcop
 
-Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. **Person A's kernel
-dataplane is implemented; the CLI still accepts only bootstrap configuration.**
+Hackathon eBPF/XDP firewall for the Bytecode Bouncer problem. **The kernel and
+control-plane foundation are implemented; full telemetry integration is pending.**
 This is not yet the complete, integrated firewall. Deadline: 13 November 2026,
 11:59 p.m. IST.
 
@@ -64,14 +64,14 @@ namespace/socket ownership is checked before cleanup. Failed startup rolls back
 resources it created. Build and demo setup remain separate; `trafficcop start`
 still operates on an existing interface as the grading harness requires.
 
-Only blank lines, comments and one optional `default pass` are accepted. `reload`,
-`set`, `jail`, `unjail`, `log`, filtering and the honeypot argument are explicitly
-unsupported. Counters for unfinished features are zero and record arrays empty.
+The complete rules grammar, policy enforcement, optional honeypot argument,
+atomic reload, live `set add|del` and `unjail` are implemented. `jail`/`log` still
+explicitly fail until C's telemetry provider is wired; stats remain counter-only
+on this foundation branch. See [control-plane handoff](docs/control-plane.md).
 The kernel now parses Ethernet/VLAN/IPv4/options/fragments/IPv6 extensions and
 classifies malformed frames correctly. With bootstrap configuration, valid IP
-passes except unmatched non-first fragments, which drop. Policy-rule loading
-and live commands still need Person B's integration; stats panels/event history
-need Person C's integration. Do not assume the CLI enables those features yet.
+passes except unmatched non-first fragments, which drop. Stats panels/event
+history still need Person C's integration. Do not assume those features are ready.
 
 ### Person A dataplane tests and handoff
 

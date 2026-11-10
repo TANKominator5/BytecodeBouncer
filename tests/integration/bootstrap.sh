@@ -17,8 +17,8 @@ ip -n "$ns" link set eth0 up
 ip -n "$ns" link set players up
 ip -n "$ns" link set lo up
 run() { nsenter --net="/run/netns/$ns" "$@"; }
-# Failed validation must not attach anything.
-echo 'EXPECTED FAILURE: unsupported start arguments (the following error is intentional)'
+# A missing honeypot interface must not attach anything.
+echo 'EXPECTED FAILURE: missing honeypot interface (the following error is intentional)'
 if run ./trafficcop start eth0 /dev/null extra; then echo 'unexpected unsupported-argument success' >&2; exit 1; fi
 [[ ! -S /run/trafficcop/control.sock ]]
 # Attachment failure must release the socket, lock and HTTP listener.
@@ -48,9 +48,10 @@ with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: 
 assert set(web)==set(after)
 assert web['passed']>=after['passed']
 with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'Bootstrap' in r.read()
-assert call('reload','tests/fixtures/bootstrap.rules').returncode==1
+assert call('reload','/nonexistent/trafficcop.rules').returncode==1
+assert call('reload','tests/fixtures/bootstrap.rules').returncode==0
 assert call('stats').returncode==0
-print('PASS: real XDP counters, singleton, HTTP, unsupported-command preservation')
+print('PASS: real XDP counters, singleton, HTTP, failed/successful reload')
 PY
 SECONDS=0
 run ./trafficcop stop

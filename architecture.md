@@ -13,18 +13,17 @@ host-wide singleton. The socket is mode 0600; an advisory lock serializes startu
 No maps need pinning while the daemon owns their descriptors. If future recovery
 requires pins, use only an owned subtree and clean it on every failure/stop.
 
-## Current implementation
-- `start <ifname> <rulesfile>` accepts comments, blank lines, and at most one
-  `default pass`; unsupported syntax is rejected with its original line number.
+## Current implementation (control-plane foundation; telemetry integration pending)
+- The parser accepts the complete strict grammar, original line numbers, forward
+  sets and normalized mixed-family prefixes. Start supports a honeypot interface.
 - A child daemon reports readiness only after HTTP/socket bind and native XDP
   attachment. An existing attachment is not force-replaced.
 - XDP implements parsing, first-match policy, sets, per-rule/source buckets,
-  jail/scans, bounce/redirect, counters and event production. The bootstrap CLI
-  still publishes only an empty/default-pass configuration; other syntax stays
-  rejected until Person B integrates the loader. Malformed IP drops and
-  non-first-fragment fallback apply even with no rules.
-- `stats`, `/stats.json`, dashboard polling, `stop`, signal cleanup and restart
-  work. All other commands explicitly fail until implemented.
+  jail/scans, bounce/redirect, counters and event production. Start/reload publish
+  complete policy generations; live set edits and atomic unjail operate on maps.
+- Stats/dashboard still use the old counter-only adapter. Jail/log snapshots,
+  full generation metadata and continuous event consumption require C's provider;
+  the jail/log commands explicitly report that pending integration on this branch.
 - The binary embeds the built ELF. No Go bindings generator is required yet;
   an ELF-layout test checks the shared counter ABI without root.
 
@@ -50,7 +49,7 @@ original file line numbers are separate concepts. ABI v5 and its integration
 protocol are documented in [docs/dataplane-abi.md](docs/dataplane-abi.md). The task
 owner authorized this shared change; B/C review remains required before merge.
 
-## Reload publication: mechanism selected, CLI integration pending
+## Reload publication
 Each immutable config map belongs to one loaded program generation. Build and
 freeze a complete candidate, reuse persistent maps, then update the existing XDP
 bpf_link program. Program/map references live through outstanding invocations;
@@ -58,6 +57,13 @@ kernel RCU reclaims retired programs after descriptors close. This avoids both
 mutable/reusable config slots and an unbounded list of retained generations.
 The isolated wire test exercises five replacements under traffic, not the CLI
 reload or its one-second worst-case timing on Linux 6.8.
+
+The production loader now creates a private BPF_F_RDONLY_PROG config map and
+freezes it before program verification, reuses persistent maps and builds fresh
+sets, buckets, scan state and rule counters. Only a successful link update changes
+the active collection/version; failed candidates close their own resources.
+Mutation serialization and snapshot read locks protect collection/metadata
+lifetime. All source/jail map reads use batches; jail reads take BPF_F_LOCK.
 
 A complete candidate is parsed and validated before active state changes. A
 packet must select one complete immutable configuration, including rules and set
