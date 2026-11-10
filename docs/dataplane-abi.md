@@ -1,4 +1,4 @@
-# Person A dataplane handoff (ABI v3)
+# Person A dataplane handoff (ABI v4)
 
 `include/contract.h` is the authoritative layout. Shared changes were authorized
 by the task owner; B/C review is still required before merge. A also adds kernel
@@ -36,8 +36,8 @@ Pass these persistent maps to `NewCollectionWithOptions` / `MapReplacements`:
 
 Other maps (`config`, `rule_counters`, `sets`, `buckets`, `scans`) belong to one
 generation. Scan windows and buckets restart on reload; jail/history do not.
-ABI v3 reuses the jail value's former reserved word as `retired` and adds
-`retired,reserved` before the scan generation (scan size 8,224; bitmap offset 32).
+ABI v4 reuses the jail value's former reserved word as `retired` and adds
+`retired,reserved` before the scan generation plus a pending jail deadline (scan size 8,232; bitmap offset 40).
 No userspace Go mirror is shipped as production code until B integrates it;
 the typed fixtures demonstrate encoding without unsafe casts.
 
@@ -73,14 +73,14 @@ active generation's trie; they must not reset counters or increment generation.
   range). It preserves fractional refill and never multiplies allowance by CPU
   count. A bounded 64-attempt contention retry failure increments bucket_failed.
 - `jail`: HASH with no active-entry eviction. Values contain a `bpf_spin_lock`.
-  Read/update with `BPF_F_LOCK` (`LookupWithFlags(..., LookupLock)` and
-  `Update(..., UpdateLock)`). To unjail set `until_ns=0` on the existing entry,
-  not delete: a kernel CPU may still hold its value pointer. Compare expiration
+  Read with `BPF_F_LOCK` (`LookupWithFlags(..., LookupLock)`). Unjail only
+  through the control program described below; never read then rewrite a value.
+  A kernel CPU may still hold its value pointer. Compare expiration
   against `CLOCK_MONOTONIC`, round positive remaining seconds up. Expired entries are reclaimed on allocation pressure. A collector takes the
   shared maintenance flag, marks an expired value retired under its spinlock,
   then deletes it outside the lock. Writers retry retired jail pointers rather
-  than extending orphaned values. Preserve the retired field on userspace updates;
-  retry retired records instead of reviving them. Do not independently delete
+  than extending orphaned values. Userspace must not rewrite jail values;
+  use the atomic command below instead. Do not independently delete
   entries or reset maintenance flags.
 - `sources`: non-LRU HASH, counts every valid IP packet reaching step 6, including
   packets dropped by jail/scan. A single atomic counter includes all CPUs. Sort
@@ -149,3 +149,21 @@ The bounded jail writer retries four times and reports jail_full on exhaustion.
 Fully active capacity exhaustion remains a resource failure, not a claim of
 unlimited state. Scanning a full active map can be costly; measure worst-case
 pressure on the target, and do not claim a packet-rate bound for this path.
+
+## Atomic unjail command (Person B)
+
+Serialize control requests in the daemon. Write `unjail_request[0]` with the
+32-byte `tc_unjail_request` (24-byte address, uint32 result/reserved both zero),
+then execute `unjail_command` using BPF_PROG_TEST_RUN / Program.Run with a dummy
+14-byte frame. This program is control-only: never attach it to an interface.
+Read the result: 1=success, 2=not currently jailed, 3=retired value/retry. For 3,
+retry within the CLI deadline, otherwise report failure. The program checks
+retirement and clears the latest release time in a single value-lock critical
+section. No stale userspace snapshot can reset retirement or overwrite a later
+jail update. Use this program from the active collection, sharing its jail map.
+
+Scan state retains a pending jail deadline if jail insertion fails. Every later
+port-bearing frame, including a repeated destination port, retries that decision
+and drops until it is installed or its original deadline expires. Reclamation
+preserves pending decisions; successful installation clears the matching pending
+deadline. This prevents transient collector contention from bypassing detection.

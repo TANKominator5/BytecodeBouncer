@@ -73,10 +73,10 @@ type testJail struct {
 }
 type testBucket struct{ NextNS uint64 }
 type testScan struct {
-	Lock, Count         uint32
-	Retired, Reserved   uint32
-	Generation, StartNS uint64
-	Ports               [1024]uint64
+	Lock, Count                         uint32
+	Retired, Reserved                   uint32
+	Generation, StartNS, PendingUntilNS uint64
+	Ports                               [1024]uint64
 }
 type testEvent struct {
 	TimeNS, Generation uint64
@@ -1271,4 +1271,95 @@ func TestKernelExpiredStateReclamation(t *testing.T) {
 		}
 		runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(2)), drop)
 	})
+}
+
+func TestKernelPendingScanJail(t *testing.T) {
+	conf := cfg()
+	conf.ScanPorts = 2
+	conf.ScanWindowSeconds = 60
+	conf.ScanJailSeconds = 60
+	c := loadPolicySized(t, conf, nil, 1)
+	if err := c.Maps["jail"].Put(addr("198.51.100.1"), testJail{}); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the collector flag: a threshold crossing cannot reclaim a jail slot.
+	if err := c.Maps["maintenance"].Put(uint32(0), uint64(1)); err != nil {
+		t.Fatal(err)
+	}
+	frame := func(port uint16) []byte { return ipv4("192.0.2.1", 17, 0, 5, udp(port)) }
+	runPacket(t, c, frame(7), pass)
+	runPacket(t, c, frame(8), drop)
+	// Repeating a known port must remain blocked even without installed jail state.
+	runPacket(t, c, frame(7), drop)
+	if err := c.Maps["maintenance"].Put(uint32(0), uint64(0)); err != nil {
+		t.Fatal(err)
+	}
+	runPacket(t, c, frame(7), drop)
+	var jail testJail
+	if err := c.Maps["jail"].LookupWithFlags(addr("192.0.2.1"), &jail, ebpf.LookupLock); err != nil {
+		t.Fatal(err)
+	}
+	if jail.UntilNS <= monotonicNS(t) {
+		t.Fatal("pending jail was not retried")
+	}
+	runPacket(t, c, frame(9), drop)
+}
+
+func TestKernelAtomicUnjail(t *testing.T) {
+	c := loadPolicySized(t, cfg(testRule{Action: jailAction, JailSeconds: 60, Matches: 32, DportMin: 9, DportMax: 9}), nil, 2)
+	type request struct {
+		Src              testAddress
+		Result, Reserved uint32
+	}
+	command := func(src testAddress) uint32 {
+		t.Helper()
+		if err := c.Maps["unjail_request"].Put(uint32(0), request{Src: src}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Programs["unjail_command"].Run(&ebpf.RunOptions{Data: make([]byte, 14), Repeat: 1}); err != nil {
+			t.Fatal(err)
+		}
+		var r request
+		if err := c.Maps["unjail_request"].Lookup(uint32(0), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r.Result
+	}
+	src := addr("192.0.2.1")
+	if command(src) != 2 {
+		t.Fatal("absent source succeeded")
+	}
+	// A command cannot clear the collector's retirement marker, even if its
+	// timestamp appears active (models a stale userspace read before retirement).
+	state := testJail{Retired: 1, UntilNS: monotonicNS(t) + 60_000_000_000}
+	if err := c.Maps["jail"].Put(src, state); err != nil {
+		t.Fatal(err)
+	}
+	if command(src) != 3 {
+		t.Fatal("retired source did not request retry")
+	}
+	var kept testJail
+	if err := c.Maps["jail"].LookupWithFlags(src, &kept, ebpf.LookupLock); err != nil {
+		t.Fatal(err)
+	}
+	if kept.Retired != 1 || kept.UntilNS != state.UntilNS {
+		t.Fatal("command revived retired entry")
+	}
+	state.Retired = 0
+	if err := c.Maps["jail"].Update(src, state, ebpf.UpdateLock); err != nil {
+		t.Fatal(err)
+	}
+	if command(src) != 1 {
+		t.Fatal("active source was not released")
+	}
+	runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(10)), pass)
+	// A later kernel jail decision must still take effect; another command
+	// releases the latest value without carrying any stale snapshot into a write.
+	runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(9)), drop)
+	runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(10)), drop)
+	if command(src) != 1 {
+		t.Fatal("new jail was lost")
+	}
+	runPacket(t, c, ipv4("192.0.2.1", 17, 0, 5, udp(10)), pass)
+	healthy(t, c)
 }

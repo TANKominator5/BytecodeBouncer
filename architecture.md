@@ -46,7 +46,7 @@ logging use a common verdict-finalization path so each packet is counted once.
 `include/contract.h` is authoritative for native-endian map fields and
 network-order address bytes. Reserved bytes must be zero. Use fixed-width types,
 explicit padding, C static assertions and Go ELF/layout tests. Rule indices and
-original file line numbers are separate concepts. ABI v3 and its integration
+original file line numbers are separate concepts. ABI v4 and its integration
 protocol are documented in [docs/dataplane-abi.md](docs/dataplane-abi.md). The task
 owner authorized this shared change; B/C review remains required before merge.
 
@@ -109,3 +109,8 @@ concurrent writer from reviving a value after deletion. Share maintenance with
 jail across program replacements. Active state is never evicted. Scan allocation
 failures drop the current packet with diagnostics instead of bypassing detection.
 See the ABI handoff for finite-capacity and pressure-path performance limits.
+
+Unjail uses a separate, never-attached XDP control program invoked by test-run;
+it checks retirement and clears release time under one lock, rather than a
+userspace read/modify/write. Scan threshold decisions remain pending across jail
+allocation contention and are retried even on repeated destination ports.

@@ -2,7 +2,7 @@
 #define TRAFFICCOP_CONTRACT_H
 #include <linux/types.h>
 #include <linux/bpf.h>
-#define TC_ABI_VERSION 3
+#define TC_ABI_VERSION 4
 #define TC_MAX_RULES 64
 #define TC_MAX_SETS 16
 #define TC_MAX_PREFIXES 10000
@@ -68,9 +68,13 @@ struct tc_event {
     __u16 sport, dport;
     __u8 proto, has_ports, reserved[2];
 };
-/* Userspace jail reads/writes must use BPF_F_LOCK. Set until_ns=0 to unjail;
- * do not delete a value that a concurrent packet may still be updating. */
+/* Userspace reads use BPF_F_LOCK; release through unjail_command, never a
+ * separately locked read/modify/write that could clear a retirement marker. */
 struct tc_jail_value { struct bpf_spin_lock lock; __u32 retired; __u64 until_ns; };
+
+enum tc_unjail_result { TC_UNJAIL_OK = 1, TC_UNJAIL_ABSENT = 2, TC_UNJAIL_RETRY = 3 };
+struct tc_unjail_request { struct tc_address src; __u32 result, reserved; };
+_Static_assert(sizeof(struct tc_unjail_request) == 32, "unjail request ABI changed");
 struct tc_bucket_value {
     /* Atomic GCRA/token-bucket virtual finish time. LRU maps cannot contain
      * bpf_spin_lock on Linux 6.8; a 64-bit CAS serializes source consumption. */
@@ -80,7 +84,7 @@ struct tc_scan_value {
     struct bpf_spin_lock lock;
     __u32 count;
     __u32 retired, reserved;
-    __u64 generation, start_ns;
+    __u64 generation, start_ns, pending_until_ns;
     __u64 ports[1024];
 };
 _Static_assert(sizeof(struct tc_prefix) == 20, "prefix ABI changed");
@@ -92,11 +96,11 @@ _Static_assert(sizeof(struct tc_health) == 48, "health ABI changed");
 _Static_assert(sizeof(struct tc_event) == 80, "event ABI changed");
 _Static_assert(sizeof(struct tc_jail_value) == 16, "jail ABI changed");
 _Static_assert(sizeof(struct tc_bucket_value) == 8, "bucket ABI changed");
-_Static_assert(sizeof(struct tc_scan_value) == 8224, "scan ABI changed");
+_Static_assert(sizeof(struct tc_scan_value) == 8232, "scan ABI changed");
 _Static_assert(__builtin_offsetof(struct tc_rule, src) == 24, "rule src offset changed");
 _Static_assert(__builtin_offsetof(struct tc_rule, family) == 74, "rule family offset changed");
 _Static_assert(__builtin_offsetof(struct tc_config, rules) == 40, "rules offset changed");
 _Static_assert(__builtin_offsetof(struct tc_event, src) == 24, "event src offset changed");
 _Static_assert(__builtin_offsetof(struct tc_event, proto) == 76, "event protocol offset changed");
-_Static_assert(__builtin_offsetof(struct tc_scan_value, ports) == 32, "scan bitmap offset changed");
+_Static_assert(__builtin_offsetof(struct tc_scan_value, ports) == 40, "scan bitmap offset changed");
 #endif

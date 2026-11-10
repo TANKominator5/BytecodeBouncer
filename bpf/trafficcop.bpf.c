@@ -19,6 +19,7 @@ ARRAY_MAP(counters, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_counters);
 ARRAY_MAP(health, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_health);
 /* One collector per state map, shared with jail across program replacements. */
 ARRAY_MAP(maintenance, BPF_MAP_TYPE_ARRAY, 2, __u64);
+ARRAY_MAP(unjail_request, BPF_MAP_TYPE_ARRAY, 1, struct tc_unjail_request);
 ARRAY_MAP(config, BPF_MAP_TYPE_ARRAY, 1, struct tc_config);
 ARRAY_MAP(rule_counters, BPF_MAP_TYPE_PERCPU_ARRAY, TC_MAX_RULES, struct tc_rule_counters);
 SOURCE_MAP(sources, TC_STATE_SOURCES, __u64);
@@ -140,3 +141,24 @@ SEC("xdp") int trafficcop(struct xdp_md *ctx)
     return finish(c, cfg->default_action == TC_DROP ? TC_DROP : TC_PASS);
 }
 char LICENSE[] SEC("license") = "GPL";
+
+/* Control-only program, invoked with BPF_PROG_TEST_RUN, never attached. The
+ * daemon serializes requests on its private request map. Release and retirement
+ * checks happen in one critical section, not two userspace map syscalls. */
+SEC("xdp") int unjail_command(struct xdp_md *ctx)
+{
+    (void)ctx;
+    __u32 zero = 0;
+    struct tc_unjail_request *request = bpf_map_lookup_elem(&unjail_request, &zero);
+    if (!request) return XDP_ABORTED;
+    struct tc_jail_value *value = bpf_map_lookup_elem(&jail, &request->src);
+    if (!value) { request->result = TC_UNJAIL_ABSENT; return XDP_PASS; }
+    __u64 now = bpf_ktime_get_ns();
+    bpf_spin_lock(&value->lock);
+    __u32 result = TC_UNJAIL_ABSENT;
+    if (value->retired) result = TC_UNJAIL_RETRY;
+    else if (value->until_ns > now) { value->until_ns = 0; result = TC_UNJAIL_OK; }
+    bpf_spin_unlock(&value->lock);
+    request->result = result;
+    return XDP_PASS;
+}

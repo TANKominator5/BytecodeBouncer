@@ -28,7 +28,7 @@ static long reclaim_scan(void *map, const void *key, void *raw, void *context)
     struct tc_scan_value *value = raw;
     struct reclaim_context *gc = context;
     bpf_spin_lock(&value->lock);
-    int expired = !value->retired &&
+    int expired = !value->retired && value->pending_until_ns <= gc->now &&
         (value->generation != gc->generation ||
          (gc->now >= value->start_ns && gc->now - value->start_ns >= gc->window_ns));
     if (expired) value->retired = 1;
@@ -80,7 +80,7 @@ static __always_inline int is_jailed(const struct tc_address *src, __u64 now)
     bpf_spin_unlock(&value->lock);
     return active;
 }
-static __always_inline void jail_source(const struct tc_address *src, __u64 until,
+static __always_inline int jail_source(const struct tc_address *src, __u64 until,
                                         struct tc_health *h)
 {
     /* A simultaneous collector can retire the old pointer between lookup and
@@ -101,9 +101,10 @@ static __always_inline void jail_source(const struct tc_address *src, __u64 unti
         int retired = value->retired;
         if (!retired && until > value->until_ns) value->until_ns = until;
         bpf_spin_unlock(&value->lock);
-        if (!retired) return;
+        if (!retired) return 1;
     }
     if (h) h->jail_full++;
+    return 0;
 }
 static __always_inline int take_token(__u32 index, const struct tc_address *src,
                                       const struct tc_rule *rule, __u64 now,
@@ -160,7 +161,7 @@ static __always_inline int scan_source(const struct tc_packet *p, const struct t
         if (h) h->scan_full++;
         return -1;
     }
-    int trigger = 0;
+    __u64 pending = 0;
     bpf_spin_lock(&value->lock);
     if (value->retired) {
         bpf_spin_unlock(&value->lock);
@@ -182,11 +183,17 @@ static __always_inline int scan_source(const struct tc_packet *p, const struct t
     if (!(value->ports[word] & mask)) {
         value->ports[word] |= mask;
         value->count++;
-        trigger = value->count >= cfg->scan_ports;
+        if (value->count >= cfg->scan_ports && value->pending_until_ns <= now)
+            value->pending_until_ns = now + (__u64)cfg->scan_jail_seconds * NS_PER_SECOND;
     }
+    pending = value->pending_until_ns;
     bpf_spin_unlock(&value->lock);
-    if (trigger)
-        jail_source(&p->src, now + (__u64)cfg->scan_jail_seconds * NS_PER_SECOND, h);
-    return trigger;
+    if (pending <= now) return 0;
+    if (jail_source(&p->src, pending, h)) {
+        bpf_spin_lock(&value->lock);
+        if (value->pending_until_ns == pending) value->pending_until_ns = 0;
+        bpf_spin_unlock(&value->lock);
+    }
+    return 1;
 }
 #endif
