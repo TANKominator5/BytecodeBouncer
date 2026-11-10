@@ -55,7 +55,7 @@ runtime, fresh-machine build and a final flood speed benchmark remain unverified
   targets, CI steps and an LF shell-checkout rule. Kernel ABI v5 is unchanged.
   No separate Go/BPF JSON schemas, frontend services or userspace packet verdicts.
 
-No pushes or PRs have been made for this work. Local commits were approved.
+This work is published for review in PR #6.
 Shared API/build/pipeline changes need normal teammate review before merge.
 
 ## Checks exercised
@@ -202,3 +202,13 @@ three consecutive focused runs after the fix. A scratch raw-map control without
 the reserve lost exactly 128 keys on all three runs using the same off-batch CPU
 switch; it was removed after diagnosis. This is a cross-owner dataplane
 and kernel-fixture correction, not a relaxed retention assertion.
+
+Jail and health endpoints use targeted map readers rather than repeating the
+full source snapshot. The shared Go TelemetryReader composes StateReader with
+ReadJail/ReadHealth and a concrete JailState; it does not change C ABI layouts.
+Observe fakes and production callers share this boundary. Tests ensure targeted
+endpoints never invoke ReadState and remain usable after the source descriptor
+is closed, while normal map lifetime locking and post-close errors are preserved.
+Unjail retries back off briefly on retirement contention instead of busy-spinning.
+The Log pending-barrier and fresh-barrier waits share one 700 ms timer, so retries
+remain bounded by a single budget; timer expiry does not poison future snapshots.

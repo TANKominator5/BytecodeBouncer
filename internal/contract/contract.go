@@ -117,6 +117,17 @@ type State struct {
 }
 type StateReader interface{ ReadState() (State, error) }
 
+// Targeted snapshots avoid scanning source counts for jail/health endpoints.
+type JailState struct {
+	NowNS uint64
+	Jails []JailRecord
+}
+type TelemetryReader interface {
+	StateReader
+	ReadJail() (JailState, error)
+	ReadHealth() (Health, error)
+}
+
 // EventReader is the B-to-C stream boundary. B decodes ABI records; C drains
 // continuously and owns the last-1000 history. Close must unblock ReadEvent.
 type EventReader interface {

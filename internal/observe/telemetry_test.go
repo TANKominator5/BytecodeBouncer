@@ -15,14 +15,27 @@ import (
 )
 
 type fakeState struct {
-	mu    sync.Mutex
-	state contract.State
+	mu        sync.Mutex
+	state     contract.State
+	fullReads int
 }
 
 func (f *fakeState) ReadState() (contract.State, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.fullReads++
 	return f.state, nil
+}
+
+func (f *fakeState) ReadJail() (contract.JailState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return contract.JailState{NowNS: f.state.NowNS, Jails: f.state.Jails}, nil
+}
+func (f *fakeState) ReadHealth() (contract.Health, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.state.Health, nil
 }
 
 type streamMessage struct {
@@ -87,7 +100,7 @@ func TestExactSnapshotOrdering(t *testing.T) {
 	if s.RulesVersion != 7 || s.JailedSources != 3 || s.Rules[0].Line != 40 || s.Rules[1].Line != 5 || s.Sets[0].Name != "a" || state.Sets[0].Name != "z" {
 		t.Fatalf("snapshot %+v", s)
 	}
-	j, err := jailFrom(state)
+	j, err := jailFrom(contract.JailState{NowNS: state.NowNS, Jails: state.Jails})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,5 +251,24 @@ func TestEventBarrierTimeoutRecovers(t *testing.T) {
 	}
 	if len(retry.events) != 1 || retry.events[0].Line != 42 {
 		t.Fatal("retry returned before new barrier was drained")
+	}
+}
+
+func TestTargetedTelemetryDoesNotReadSources(t *testing.T) {
+	f := &fakeState{state: contract.State{NowNS: 10, Health: contract.Health{SourceFull: 9}, Jails: []contract.JailRecord{{Src: rawAddress("192.0.2.1"), UntilNS: 11}}}}
+	s := New(f, newFakeStream())
+	defer s.Close()
+	jail, err := s.Jail()
+	if err != nil || len(jail) != 1 || jail[0].Src != "192.0.2.1" {
+		t.Fatalf("jail: %+v %v", jail, err)
+	}
+	health, err := s.Diagnostics()
+	if err != nil || health.SourceFull != 9 {
+		t.Fatalf("health: %+v %v", health, err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fullReads != 0 {
+		t.Fatal("targeted telemetry read the full source snapshot")
 	}
 }

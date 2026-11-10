@@ -27,6 +27,10 @@ func (p *Plane) Events() (contract.EventReader, error) {
 	if p.stream != nil {
 		return nil, fmt.Errorf("event consumer already exists")
 	}
+	// The reader's mmap/epoll registration retains the underlying file. Reload
+	// MapReplacements clone the same open file into the next collection, so
+	// closing the old collection's descriptor leaves event polling active.
+	// The daemon closes the reader before closing the final collection.
 	r, err := ringbuf.NewReader(p.collection.Maps["events"])
 	if err != nil {
 		return nil, err

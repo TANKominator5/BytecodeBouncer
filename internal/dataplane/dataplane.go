@@ -330,6 +330,7 @@ func (p *Plane) Unjail(address netip.Addr) error {
 			return fmt.Errorf("address is not jailed")
 		case contract.UnjailRetry:
 			if time.Now().Before(deadline) {
+				time.Sleep(100 * time.Microsecond)
 				continue
 			}
 		}

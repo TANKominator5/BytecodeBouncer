@@ -42,7 +42,7 @@ func compareAddress(a, b contract.Address) int {
 func better(a, b contract.SourceCount) bool {
 	return a.Packets > b.Packets || a.Packets == b.Packets && compareAddress(a.Src, b.Src) < 0
 }
-func jailFrom(state contract.State) ([]contract.JailEntry, error) {
+func jailFrom(state contract.JailState) ([]contract.JailEntry, error) {
 	active := make(map[contract.Address]uint64)
 	for _, j := range state.Jails {
 		if j.UntilNS > state.NowNS && j.UntilNS > active[j.Src] {
@@ -125,7 +125,7 @@ func statsFrom(state contract.State) (Stats, error) {
 		}
 		s.TopSources = append(s.TopSources, contract.SourceStats{Src: text, Packets: src.Packets})
 	}
-	jail, err := jailFrom(state)
+	jail, err := jailFrom(contract.JailState{NowNS: state.NowNS, Jails: state.Jails})
 	if err != nil {
 		return Stats{}, err
 	}

@@ -14,7 +14,7 @@ import (
 const historySize = 1000
 
 type Service struct {
-	reader      contract.StateReader
+	reader      contract.TelemetryReader
 	stream      contract.EventReader
 	mu          sync.Mutex
 	flushMu     sync.Mutex
@@ -31,7 +31,7 @@ type Service struct {
 
 var _ contract.Telemetry = (*Service)(nil)
 
-func New(reader contract.StateReader, stream contract.EventReader) *Service {
+func New(reader contract.TelemetryReader, stream contract.EventReader) *Service {
 	s := &Service{reader: reader, stream: stream, done: make(chan struct{})}
 	go s.drain()
 	return s
@@ -136,7 +136,7 @@ func (s *Service) Jail() ([]contract.JailEntry, error) {
 	if err := s.available(); err != nil {
 		return nil, err
 	}
-	state, err := s.reader.ReadState()
+	state, err := s.reader.ReadJail()
 	if err != nil {
 		return nil, err
 	}
@@ -248,11 +248,10 @@ func (s *Service) Diagnostics() (Diagnostics, error) {
 	if err := s.available(); err != nil {
 		return Diagnostics{}, err
 	}
-	state, err := s.reader.ReadState()
+	h, err := s.reader.ReadHealth()
 	if err != nil {
 		return Diagnostics{}, err
 	}
-	h := state.Health
 	d := Diagnostics{SourceFull: h.SourceFull, JailFull: h.JailFull, ScanFull: h.ScanFull, BucketFailed: h.BucketFailed, EventLost: h.EventLost, ConfigMissing: h.ConfigMissing}
 	s.mu.Lock()
 	d.EventsRead = s.eventsRead

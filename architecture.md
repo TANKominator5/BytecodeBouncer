@@ -72,7 +72,9 @@ kernel fixtures keep every feature enabled; packet decisions remain inside XDP.
 Mutation serialization and snapshot read locks protect collection/metadata
 lifetime. All source/jail map reads use batches; jail reads take BPF_F_LOCK.
 Private limit-map allocation uses at most four workers to meet the measured
-reload budget; each rule still owns a separate 65,536-entry LRU. The existing
+reload budget; each rule still owns a separate LRU with at least 65,536 usable
+source entries, plus 128 allocated slots per possible CPU for kernel free-node
+reserves. The existing
 template serves the first rule. All preparation workers finish before publication.
 
 A complete candidate is parsed and validated before active state changes. A

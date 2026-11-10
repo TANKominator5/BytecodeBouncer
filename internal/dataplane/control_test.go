@@ -242,3 +242,32 @@ func TestKernelProductionBucketCapacity(t *testing.T) {
 		}
 	}
 }
+
+func TestKernelProductionTargetedSnapshots(t *testing.T) {
+	p := productionPlane(t, "jail 60\n")
+	runPacket(t, p.collection, ipv4("192.0.2.1", 17, 0, 5, udp(53)), drop)
+	// These reads must remain usable without a source-map descriptor.
+	if err := p.collection.Maps["sources"].Close(); err != nil {
+		t.Fatal(err)
+	}
+	jail, err := p.ReadJail()
+	if err != nil || len(jail.Jails) != 1 || jail.Jails[0].UntilNS <= jail.NowNS {
+		t.Fatalf("jail %+v %v", jail, err)
+	}
+	health, err := p.ReadHealth()
+	if err != nil || health != (contract.Health{}) {
+		t.Fatalf("health %+v %v", health, err)
+	}
+	if _, err := p.ReadState(); err == nil {
+		t.Fatal("full snapshot accepted missing source descriptor")
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ReadJail(); err == nil {
+		t.Fatal("jail read after close")
+	}
+	if _, err := p.ReadHealth(); err == nil {
+		t.Fatal("health read after close")
+	}
+}
