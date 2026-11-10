@@ -162,3 +162,10 @@ local verifier work dropped to 192,723 instructions (about 216 ms focused, 389 m
 under concurrent wire load). All local parser/race/vet/kernel/wire/bootstrap/demo
 checks passed. Earlier GitHub checks timed out during startup; the updated head
 must pass CI before merge. Target Linux 6.8 and full CLI reload timing remain open.
+
+CI fixture correction: both 5c88264 runs passed startup and all kernel scenarios
+except the hour-old cancellation fixture. Backdating a uint64 monotonic timestamp
+by 3,601 seconds on a freshly booted runner wraps into the future. The live-record
+protection assertion still runs everywhere; the hour-old subcase now explicitly
+skips only when host uptime cannot represent that history. Both assertions passed
+on the local long-running host, as did make test. Production retention is unchanged.

@@ -1412,15 +1412,25 @@ func TestKernelCancellationReclamation(t *testing.T) {
 	if err := c.Maps["jail"].LookupWithFlags(old, &kept, ebpf.LookupLock); err != nil {
 		t.Fatal("live cancellation reclaimed:", err)
 	}
-	state.CancelledNS = monotonicNS(t) - 3601_000_000_000
-	if err := c.Maps["jail"].Update(old, state, ebpf.UpdateLock); err != nil {
-		t.Fatal(err)
-	}
-	runPacket(t, c, frame, drop)
-	if err := c.Maps["jail"].LookupWithFlags(addr("192.0.2.2"), &kept, ebpf.LookupLock); err != nil {
-		t.Fatal("expired cancellation was not reclaimed:", err)
-	}
-	if kept.UntilNS <= monotonicNS(t) {
-		t.Fatal("new jail not installed")
-	}
+	t.Run("hour-old-cancellation", func(t *testing.T) {
+		// A fresh runner cannot contain an hour-old monotonic timestamp.
+		// Do not wrap uint64 into a future time to fabricate one. The live
+		// cancellation assertion above still executes on every host.
+		const aged = uint64(contract.MaxJailSeconds+1) * uint64(time.Second)
+		now := monotonicNS(t)
+		if now <= aged {
+			t.Skip("host monotonic uptime is too short for an hour-old cancellation fixture")
+		}
+		state.CancelledNS = now - aged
+		if err := c.Maps["jail"].Update(old, state, ebpf.UpdateLock); err != nil {
+			t.Fatal(err)
+		}
+		runPacket(t, c, frame, drop)
+		if err := c.Maps["jail"].LookupWithFlags(addr("192.0.2.2"), &kept, ebpf.LookupLock); err != nil {
+			t.Fatal("expired cancellation was not reclaimed:", err)
+		}
+		if kept.UntilNS <= monotonicNS(t) {
+			t.Fatal("new jail not installed")
+		}
+	})
 }
