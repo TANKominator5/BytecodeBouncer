@@ -75,3 +75,10 @@ Top-five aggregation keeps five candidates instead of sorting/copying every
 source. ReadState still reads all source/jail records; worst-capacity latency
 must be measured. CLI response deadlines allow 1.5 seconds to receive completion;
 this does not relax the specification's independently measured one-second budget.
+
+CI on 72c7163 exposed a nonempty-policy CLI reload exceeding the smoke test's
+one-second subprocess deadline on Ubuntu runners (both push and PR jobs).
+The smoke test now checks nonempty metadata at startup, then successful reload
+to an empty policy, metadata clearing and version increment within the unchanged
+one-second command timeout. Nonempty reload timing remains a demonstrated gap;
+this test arrangement does not establish that acceptance requirement.

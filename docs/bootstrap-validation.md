@@ -43,7 +43,9 @@ bound, stats correctly failed as stopped, and a second stop succeeded harmlessly
 
 The updated namespace smoke test exercises failed/successful CLI reload,
 generation increments, rejection of FIFO/device/logged policies without changing
-the generation, rule/set metadata and HTTP/CLI snapshot agreement. Live mixed-family
+the generation, nonempty rule/set metadata at startup, metadata clearing after
+reload and HTTP/CLI snapshot agreement. Nonempty reload exceeded the one-second
+smoke deadline in CI on 72c7163; its timing acceptance remains unestablished. Live mixed-family
 set edits and atomic unjail are exercised through the production map APIs by
 TestKernelProductionControl. TestKernelProductionMultipleLimits exercises two
 independent per-source inner maps through the production loader. These do not

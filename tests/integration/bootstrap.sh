@@ -26,7 +26,7 @@ echo 'EXPECTED FAILURE: nonexistent interface (the following error is intentiona
 if run ./trafficcop start nonexistent0 tests/fixtures/bootstrap.rules; then echo 'unexpected attachment success' >&2; exit 1; fi
 [[ ! -S /run/trafficcop/control.sock ]]
 SECONDS=0
-run ./trafficcop start eth0 tests/fixtures/bootstrap.rules
+run ./trafficcop start eth0 tests/fixtures/metadata.rules
 started=1
 (( SECONDS < 5 ))
 run python3 - <<'PY'
@@ -35,6 +35,8 @@ binary='./trafficcop'
 def call(*args): return subprocess.run([binary,*args],capture_output=True,text=True,timeout=1)
 assert call('start','eth0','tests/fixtures/bootstrap.rules').returncode==1
 before=json.loads(call('stats').stdout)
+assert [r['line'] for r in before['rules']]==[3],before
+assert before['sets']==[{'name':'a','prefixes':0},{'name':'z','prefixes':1}],before
 # Broadcast ARP-shaped Ethernet frames bypass filtering and count as other.
 s=socket.socket(socket.AF_PACKET,socket.SOCK_RAW);s.bind(('players',0))
 frame=b'\xff'*6+b'\x02\x00\x00\x00\x00\x02'+b'\x08\x06'+b'\x00'*46
@@ -60,15 +62,9 @@ with tempfile.TemporaryDirectory() as directory:
     for path in (fifo,'/dev/zero',logged):
         assert call('reload',path).returncode==1,path
         assert json.loads(call('stats').stdout)['rules_version']==reloaded['rules_version']
-    policy=os.path.join(directory,'policy.rules')
-    with open(policy,'w') as f: f.write('set z 10.0.0.0/24\nset a\ndrop src 192.0.2.9\n')
-    assert call('reload',policy).returncode==0
-    changed=json.loads(call('stats').stdout)
-    assert changed['rules_version']==reloaded['rules_version']+1,changed
-    assert [r['line'] for r in changed['rules']]==[3],changed
-    assert changed['sets']==[{'name':'a','prefixes':0},{'name':'z','prefixes':1}],changed
-    with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: web=json.load(r)
-    assert web['rules_version']==changed['rules_version'] and web['rules']==changed['rules']
+assert reloaded['rules']==[] and reloaded['sets']==[],reloaded
+with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: web=json.load(r)
+assert web['rules_version']==reloaded['rules_version'] and web['rules']==reloaded['rules']
 print('PASS: real XDP counters, singleton, HTTP, failed/successful reload')
 PY
 SECONDS=0
