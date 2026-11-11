@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
+	"github.com/TANKominator5/BytecodeBouncer/internal/observe"
 	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
 )
@@ -20,6 +21,50 @@ func capacityAddress(i int) contract.Address {
 	a := contract.Address{Family: 6, Bytes: [16]byte{0xfd}}
 	binary.BigEndian.PutUint64(a.Bytes[8:], uint64(i+1))
 	return a
+}
+
+func TestKernelFullSnapshotLatency(t *testing.T) {
+	if os.Getenv("TC_BPF_CAPACITY") != "1" {
+		t.Skip("set TC_BPF_CAPACITY=1 for million-source/jail snapshot")
+	}
+	requireBPF(t)
+	if availableMemory(t) < 1536<<20 {
+		t.Fatal("full snapshot test needs 1.5 GiB available")
+	}
+	p := productionPlane(t, "default pass\n"+strings.Repeat("pass\n", 64))
+	const count = 1048576
+	keys := make([]contract.Address, 1024)
+	values := make([]uint64, len(keys))
+	jails := make([]contract.JailValue, len(keys))
+	var now unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &now); err != nil {
+		t.Fatal(err)
+	}
+	for offset := 0; offset < count; offset += len(keys) {
+		for i := range keys {
+			keys[i] = capacityAddress(offset + i)
+			values[i] = uint64(offset + i + 1)
+			jails[i] = contract.JailValue{UntilNS: uint64(now.Nano()) + uint64(time.Hour)}
+		}
+		if n, err := p.collection.Maps["sources"].BatchUpdate(keys, values, nil); err != nil || n != len(keys) {
+			t.Fatalf("sources %d %v", n, err)
+		}
+		if n, err := p.collection.Maps["jail"].BatchUpdate(keys, jails, nil); err != nil || n != len(keys) {
+			t.Fatalf("jail %d %v", n, err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		start := time.Now()
+		s, err := observe.Snapshot(p)
+		elapsed := time.Since(start)
+		if err != nil || s.JailedSources != count || len(s.Rules) != 64 || len(s.TopSources) != 5 || s.TopSources[0].Packets != count {
+			t.Fatalf("snapshot jail=%d top=%+v err=%v", s.JailedSources, s.TopSources, err)
+		}
+		t.Logf("full source+jail capacity snapshot %d: %s", i, elapsed)
+		if elapsed >= time.Second {
+			t.Errorf("full stats snapshot exceeded command budget: %s", elapsed)
+		}
+	}
 }
 
 func availableMemory(t *testing.T) uint64 {

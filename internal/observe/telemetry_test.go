@@ -127,6 +127,18 @@ func TestCanonicalAddresses(t *testing.T) {
 	}
 }
 
+func TestStatsCountsJailWithoutFormattingRows(t *testing.T) {
+	a := rawAddress("2001:db8::1")
+	s, err := statsFrom(contract.State{NowNS: 100, Jails: []contract.JailRecord{{Src: a, UntilNS: 101}, {Src: a, UntilNS: 200}, {Src: rawAddress("192.0.2.1"), UntilNS: 99}}})
+	if err != nil || s.JailedSources != 1 {
+		t.Fatalf("count=%d err=%v", s.JailedSources, err)
+	}
+	_, err = statsFrom(contract.State{Jails: []contract.JailRecord{{Src: contract.Address{Family: 9}, UntilNS: 1}}})
+	if err == nil {
+		t.Fatal("invalid active jail identity accepted")
+	}
+}
+
 func TestEventHistoryBarrierAndCopies(t *testing.T) {
 	f := newFakeStream()
 	state := &fakeState{state: contract.State{Generation: 1}}

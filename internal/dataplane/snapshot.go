@@ -69,12 +69,24 @@ func (p *Plane) ReadState() (contract.State, error) {
 	for _, set := range p.policy.Sets {
 		s.Sets = append(s.Sets, contract.SetStats{Name: set.Name, Prefixes: uint32(len(set.Prefixes))})
 	}
+	// These independent maps dominate full-capacity snapshot latency. Keep the
+	// generation pinned until both reads finish, including on a source error.
+	var jail contract.JailState
+	var jailErr error
+	jailDone := make(chan struct{})
+	go func() { jail, jailErr = readJail(p.collection.Maps["jail"]); close(jailDone) }()
+	defer func() { <-jailDone }()
 	// Batch reads avoid one pair of syscalls for every source at high cardinality.
 	var cursor ebpf.MapBatchCursor
-	keys := make([]contract.Address, 1024)
-	counts := make([]uint64, 1024)
+	keys := make([]contract.Address, 8192)
+	counts := make([]uint64, len(keys))
 	for {
 		n, err := p.collection.Maps["sources"].BatchLookup(&cursor, keys, counts, nil)
+		if len(s.Sources)+n > cap(s.Sources) {
+			grown := make([]contract.SourceCount, len(s.Sources), max(len(s.Sources)+n, 2*cap(s.Sources)))
+			copy(grown, s.Sources)
+			s.Sources = grown
+		}
 		for i := 0; i < n; i++ {
 			s.Sources = append(s.Sources, contract.SourceCount{Src: keys[i], Packets: counts[i]})
 		}
@@ -85,9 +97,9 @@ func (p *Plane) ReadState() (contract.State, error) {
 			return s, err
 		}
 	}
-	jail, err := readJail(p.collection.Maps["jail"])
-	if err != nil {
-		return s, err
+	<-jailDone
+	if jailErr != nil {
+		return s, jailErr
 	}
 	s.Jails, s.NowNS = jail.Jails, jail.NowNS
 	return s, nil
@@ -112,10 +124,15 @@ func readHealth(m *ebpf.Map) (contract.Health, error) {
 func readJail(m *ebpf.Map) (contract.JailState, error) {
 	s := contract.JailState{Jails: []contract.JailRecord{}}
 	var cursor ebpf.MapBatchCursor
-	keys := make([]contract.Address, 1024)
-	jails := make([]contract.JailValue, 1024)
+	keys := make([]contract.Address, 8192)
+	jails := make([]contract.JailValue, len(keys))
 	for {
 		n, err := m.BatchLookup(&cursor, keys, jails, &ebpf.BatchOptions{ElemFlags: uint64(ebpf.LookupLock)})
+		if len(s.Jails)+n > cap(s.Jails) {
+			grown := make([]contract.JailRecord, len(s.Jails), max(len(s.Jails)+n, 2*cap(s.Jails)))
+			copy(grown, s.Jails)
+			s.Jails = grown
+		}
 		for i := 0; i < n; i++ {
 			if jails[i].Retired == 0 && jails[i].UntilNS > 0 {
 				s.Jails = append(s.Jails, contract.JailRecord{Src: keys[i], UntilNS: jails[i].UntilNS})

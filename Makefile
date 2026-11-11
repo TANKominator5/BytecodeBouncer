@@ -1,6 +1,6 @@
 CLANG ?= /usr/bin/clang
 ARCH_INCLUDE := /usr/include/$(shell gcc -dumpmachine)
-.PHONY: all test integration stress clean
+.PHONY: all test integration stress endurance clean
 all: trafficcop
 internal/dataplane/trafficcop.bpf.o: bpf/trafficcop.bpf.c $(wildcard bpf/*.h) include/contract.h
 	$(CLANG) -O2 -g -target bpfel -Iinclude -I$(ARCH_INCLUDE) -Wall -Werror -c $< -o $@
@@ -16,5 +16,7 @@ integration: all
 	sudo bash tests/integration/lifecycle.sh
 stress: all
 	sudo bash tests/integration/stress.sh
+endurance: all
+	sudo bash tests/integration/endurance.sh
 clean:
 	rm -f trafficcop internal/dataplane/trafficcop.bpf.o

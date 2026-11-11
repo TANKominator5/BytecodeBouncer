@@ -24,6 +24,8 @@ acceptance. See [integration validation](integration-validation.md) and
   - [x] Full source/jail/scan capacities and exhaustion/recovery (WSL; see follow-up evidence).
 - [x] Atomic reload, safe old-object lifetime, persistence, fresh rule counters.
   - [ ] Long-run reclamation and worst-case Linux 6.8 reload timing.
+  - [x] Repeated changed 64-limit policies: retired kernel program/map IDs reclaimed (WSL).
+  - [x] Million-source plus million-jail stats snapshot measured below one second (WSL).
 - [x] Event ABI, lossless sustained daemon logging above 20k/s, newest 1000 history/log.
 - [x] Complete dashboard panels, pps, jail and latest events; real browser screenshot.
 - [x] CLI grammar/timings/error behavior and failed-start rollback tests (local fixtures).
