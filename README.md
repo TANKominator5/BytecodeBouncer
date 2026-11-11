@@ -110,6 +110,9 @@ Finite state limits and target-platform gaps are documented in
 
 ## Dashboard
 
+Maintainer follow-up results and remaining target-hardware requirements:
+[remaining-work validation](docs/remaining-work-validation.md).
+
 Embedded HTML/CSS/JavaScript updates every second, including passed/dropped pps,
 rule hits, source ranking, jail, latest events, malformed/other and diagnostics.
 No frontend dependencies. Actual isolated-demo screenshot (traffic idle at capture,
