@@ -32,6 +32,7 @@ headers at build time. The target is x86-64 Ubuntu 24.04/Linux 6.8, four CPUs.
 make test
 make integration
 make stress
+make endurance  # separate five-minute reload/set/maximum-policy resource check
 ```
 
 Integration/stress tests create private namespaces/veths and attempt cleanup on

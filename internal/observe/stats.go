@@ -125,10 +125,18 @@ func statsFrom(state contract.State) (Stats, error) {
 		}
 		s.TopSources = append(s.TopSources, contract.SourceStats{Src: text, Packets: src.Packets})
 	}
-	jail, err := jailFrom(contract.JailState{NowNS: state.NowNS, Jails: state.Jails})
-	if err != nil {
-		return Stats{}, err
+	// Stats needs a count, not a sorted/formatted million-entry jail response.
+	// Deduplicate batch reads without allocating canonical strings or JSON rows.
+	active := make(map[contract.Address]struct{}, len(state.Jails))
+	for _, j := range state.Jails {
+		if j.UntilNS <= state.NowNS {
+			continue
+		}
+		if j.Src.Family != 4 && j.Src.Family != 6 {
+			return Stats{}, fmt.Errorf("invalid address family %d", j.Src.Family)
+		}
+		active[j.Src] = struct{}{}
 	}
-	s.JailedSources = uint64(len(jail))
+	s.JailedSources = uint64(len(active))
 	return s, nil
 }
