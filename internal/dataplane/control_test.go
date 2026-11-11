@@ -14,6 +14,7 @@ import (
 	"github.com/TANKominator5/BytecodeBouncer/internal/config"
 	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
 )
 
 func productionPlane(t *testing.T, input string) *Plane {
@@ -217,6 +218,33 @@ func TestKernelProductionSpecializedMatches(t *testing.T) {
 			runPacket(t, p.collection, tc.miss, drop)
 		})
 	}
+}
+
+func TestKernelFailedCandidateJoinsAllocators(t *testing.T) {
+	p := productionPlane(t, "default pass\n")
+	policy, err := config.ParseReader(strings.NewReader(strings.Repeat("limit 1/s burst 1\n", 64)), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reject the candidate while its 63 independent private maps are being
+	// allocated. A failed preparation must join workers and close every map.
+	p.spec.Programs["trafficcop"].Instructions = asm.Instructions{asm.Mov.Imm(asm.R0, 0)}
+	before, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = p.prepare(policy, 2, nil)
+	if err == nil {
+		t.Fatal("invalid program accepted")
+	}
+	after, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("failed candidate leaked descriptors: %d -> %d", len(before), len(after))
+	}
+	runPacket(t, p.collection, ipv6("2001:db8::7", 17, udp(1)), pass)
 }
 
 func TestKernelProductionBucketCapacity(t *testing.T) {
