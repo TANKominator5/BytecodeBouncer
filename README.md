@@ -33,6 +33,9 @@ make test
 make integration
 make stress
 make endurance  # separate five-minute reload/set/maximum-policy resource check
+make throughput # separate four-CPU private-veth flood; not physical-NIC line rate
+# Full-map CLI deadline check (currently exposes a million-entry jail timeout):
+make capacity
 ```
 
 Integration/stress tests create private namespaces/veths and attempt cleanup on

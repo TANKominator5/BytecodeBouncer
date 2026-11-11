@@ -33,3 +33,5 @@ acceptance. See [integration validation](integration-validation.md) and
 - [ ] Benchmark, README test evidence and actual dashboard screenshot.
   - [x] README, sustained logging/reload measurements and actual dashboard screenshot.
   - [ ] Target flood speed/NIC throughput benchmark.
+  - [x] Sustained four-CPU private-veth flood, exact verdict totals and recorded method.
+  - [ ] All full-capacity CLI deadlines: million-entry jail timeout/stats timing remain open.

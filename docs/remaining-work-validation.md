@@ -106,6 +106,59 @@ reload/live-set cycles, 4,623,168 exact stable-pass frames, max ordinary reload
 socket, HTTP and XDP; the private namespace was removed. These are WSL results,
 not proof of every possible timing under arbitrary load or of native 6.8 acceptance.
 
+## C: sustained private-veth flood and complete CLI capacity measurements
+
+The C follow-up includes A/B as explicit dependencies. `tests/bench/flood.c` uses
+four CPU-affined AF_PACKET senders and `sendmmsg` batches of 64, through the real
+running daemon's private native-XDP veth attachment. No BPF test-run repetition
+is used for these measurements. For each scenario, successful packet sends must
+equal the quiescent global verdict/rule totals exactly; malformed/other counts
+and failure diagnostics must not increase. Generator backpressure is counted,
+not treated as successfully delivered frames. Values are ingress pps, not wire
+Gbit/s (no invented Ethernet overhead, NIC speed or physical line-rate claim).
+
+Measured WSL x86-64 Linux 6.18.58.1, four sender CPUs 0–3 (eight allowed CPUs),
+15 seconds per case, hot four-source working set, logging disabled:
+
+| Scenario | Submitted = kernel verdict frames | Elapsed | Ingress pps |
+| --- | ---: | ---: | ---: |
+| default PASS | 13,828,261 | 15.008862 s | 921,340 |
+| unconditional DROP | 16,193,627 | 15.014398 s | 1,078,540 |
+| last match after 63 conditional limit rules | 3,554,768 | 15.017510 s | 236,708 |
+| same, eight IPv6 extension headers | 3,522,016 | 15.013970 s | 234,583 |
+
+All packet totals matched exactly. Frames were 62 bytes without extensions,
+126 bytes with extensions; IP length/checksum fields are intentionally ignored
+under the specification. Rule conditions include IPv6 prefixes, ports and VLAN.
+The first 63 rules do not consume rate tokens in this last-match workload; this
+must not be described as 64 simultaneously hot token buckets. The generator is
+the offered-load limit; these are not maximum NIC-capacity numbers.
+
+The separate **public CLI** capacity wrapper seeds the owned daemon's production
+maps with 1,048,576 distinct source counts and active jails, then measures process
+exit (including IPC/JSON/output). It refuses the host namespace, mismatched daemon
+namespace, another singleton and insufficient available memory. It emits results
+for every command and returns failure for any missed one-second deadline.
+
+The first measured full-map run: stats 832.8 ms; jail timed out at 1.510 s; log
+663.4 ms; set add/del and unjail each below 10 ms; normal reload 121.6 ms; 64-limit
+reload 407.6 ms. Jail formatting now sorts a detached active-record slice and
+deduplicates adjacent identities with the later expiry, avoiding an extra hash
+map/key sort/million hash lookups. Ordering, ceil seconds, expiry and input
+immutability have regressions. **This does not eliminate the capacity gap:** a
+subsequent run had stats 1.106 s and jail timed out at 1.513 s; log 298.2 ms;
+set/unjail below 10 ms; normal reload 114.4 ms; maximum reload 731.9 ms. Do not
+claim all worst-capacity command deadlines are satisfied. No IPC or acceptance
+deadline was increased, output truncated, or unsupported configuration accepted.
+
+`tests/integration/acceptance.sh --require-target` is a reproducible fresh-clean-
+checkout runner. It records commit, dirty state, OS/kernel/CPU/virtualization and
+compiler versions, then retains per-stage build/unit/kernel/wire/capacity/CLI/
+endurance/flood logs. It rejects wrong kernels, WSL and recognized emulation/
+containers instead of relabeling them as target evidence. It rejects this actual
+workspace before running tests. `--local` records an explicitly non-target run;
+it does not bypass failing tests. Only a fully passing suite writes `result.txt`.
+
 ## Still requires external/native validation
 
 - Native Ubuntu 24.04 / Linux 6.8 x86-64 with four CPUs. This workspace is WSL
@@ -116,3 +169,6 @@ not proof of every possible timing under arbitrary load or of native 6.8 accepta
   merges it. No direct main push or automatic issue closure is appropriate.
 - Resource exhaustion tests above concern map capacity, not arbitrary system-wide
   OOM. They deliberately do not exhaust the developer's host memory.
+- The million-entry jail CLI response and worst-capacity stats timing above still
+  miss the deadline on WSL. The target runner deliberately fails these cases;
+  they remain open, rather than being hidden behind larger timeouts or green CI.
