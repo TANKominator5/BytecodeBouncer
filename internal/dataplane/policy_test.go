@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
 	"sync"
@@ -769,9 +770,9 @@ func TestKernelExactBurstAccounting(t *testing.T) {
 	c := loadPolicy(t, conf, nil)
 	const packets = 100000
 	for i, action := range []uint32{pass, drop, bounce, honeypot} {
-		verdict, err := c.Programs["trafficcop"].Run(&ebpf.RunOptions{Data: ipv6("2001:db8::77", 17, udp(uint16(i+1))), Repeat: packets})
-		if err != nil || verdict != action {
-			t.Fatalf("action %d verdict %d: %v", action, verdict, err)
+		verdict := exactAccountingRun(t, c, ipv6("2001:db8::77", 17, udp(uint16(i+1))), packets, nil)
+		if verdict != action {
+			t.Fatalf("action %d verdict %d", action, verdict)
 		}
 		r := ruleTotals(t, c, uint32(i))
 		if r.Hits != packets || r.Passed+r.Dropped+r.Bounced+r.Honeypotted != packets {
@@ -780,9 +781,7 @@ func TestKernelExactBurstAccounting(t *testing.T) {
 	}
 	const extra = 1000
 	for _, f := range [][]byte{ipv4("10.0.0.1", 17, 0, 5, nil), ethernet(0x0806, make([]byte, 46))} {
-		if _, err := c.Programs["trafficcop"].Run(&ebpf.RunOptions{Data: f, Repeat: extra}); err != nil {
-			t.Fatal(err)
-		}
+		exactAccountingRun(t, c, f, extra, nil)
 	}
 	sum := totals(t, c)
 	if sum.Passed != packets+extra || sum.Dropped != packets+extra || sum.Bounced != packets || sum.Honeypotted != packets || sum.Malformed != extra || sum.Other != extra || sum.DefaultHits != 0 {
@@ -796,6 +795,106 @@ func TestKernelExactBurstAccounting(t *testing.T) {
 		t.Fatalf("source count %d", count)
 	}
 	healthy(t, c)
+}
+
+// A signal can interrupt BPF_PROG_TEST_RUN after some repetitions have already
+// changed maps. cilium/ebpf retries the entire Repeat count, not just the missing
+// repetitions. Restore the fixture's pre-run accounting in its Reset callback;
+// never loosen exact assertions to accommodate partially replayed test traffic.
+// This helper is only for these unattached, non-stateful accounting fixtures.
+func exactAccountingRun(t *testing.T, c *ebpf.Collection, frame []byte, repeat uint32, onReset func()) uint32 {
+	t.Helper()
+	var counters []contract.Counters
+	if err := c.Maps["counters"].Lookup(uint32(0), &counters); err != nil {
+		t.Fatal(err)
+	}
+	rules := make([][]testRuleCounters, 64)
+	for i := range rules {
+		if err := c.Maps["rule_counters"].Lookup(uint32(i), &rules[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Sources in this fixture are either the repeated IPv6 source, or invalid/
+	// non-IP frames which do not create a source entry.
+	src := addr("2001:db8::77")
+	var count uint64
+	err := c.Maps["sources"].Lookup(src, &count)
+	present := err == nil
+	if err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+		t.Fatal(err)
+	}
+	reset := func() {
+		if err := c.Maps["counters"].Put(uint32(0), counters); err != nil {
+			t.Fatal(err)
+		}
+		for i, values := range rules {
+			if err := c.Maps["rule_counters"].Put(uint32(i), values); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if present {
+			if err := c.Maps["sources"].Put(src, count); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := c.Maps["sources"].Delete(src); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			t.Fatal(err)
+		}
+		if onReset != nil {
+			onReset()
+		}
+	}
+	verdict, err := c.Programs["trafficcop"].Run(&ebpf.RunOptions{Data: frame, Repeat: repeat, Reset: reset})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verdict
+}
+
+func TestKernelInterruptedBurstAccounting(t *testing.T) {
+	c := loadPolicy(t, cfg(testRule{Action: pass}), nil)
+	// Warm the library's feature probe before directing a signal at the syscall.
+	runPacket(t, c, ethernet(0x0806, make([]byte, 46)), pass)
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, unix.SIGUSR1)
+	defer signal.Stop(signals)
+	tid := unix.Gettid()
+	stop := make(chan struct{})
+	var once sync.Once
+	stopSignals := func() { once.Do(func() { close(stop) }) }
+	defer stopSignals()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				_ = unix.Tgkill(os.Getpid(), tid, unix.SIGUSR1)
+			}
+		}
+	}()
+	resets := 0
+	const count = 1000000
+	verdict := exactAccountingRun(t, c, ipv6("2001:db8::77", 17, udp(1)), count, func() { resets++; stopSignals() })
+	stopSignals()
+	<-done
+	if resets == 0 {
+		t.Fatal("signal did not exercise interrupted test-run replay")
+	}
+	r := ruleTotals(t, c, 0)
+	if verdict != pass || r.Hits != count || r.Passed != count {
+		t.Fatalf("replayed accounting: verdict=%d counters=%+v", verdict, r)
+	}
+	var source uint64
+	if err := c.Maps["sources"].Lookup(addr("2001:db8::77"), &source); err != nil || source != count {
+		t.Fatalf("source=%d err=%v", source, err)
+	}
+	t.Logf("exact %d decisions after %d interrupted syscall replay(s)", count, resets)
 }
 
 func packetSocket(t *testing.T, index int) int {

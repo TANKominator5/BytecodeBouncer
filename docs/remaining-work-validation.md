@@ -1,0 +1,58 @@
+# Follow-up acceptance evidence — 11 November 2026
+
+Tracks the maintainer's remaining-work comments on issues #1, #2 and #3. Results
+below are measured, not a claim that the open issues can all be closed.
+
+## A: exact-accounting CI regression
+
+Main run [42926807664](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/42926807664)
+reported 100,001 honeypot decisions for a requested 100,000-repetition test run.
+`BPF_PROG_TEST_RUN` can return EINTR after executing part of a burst. cilium/ebpf
+v0.17.3 retries the entire count and provides `RunOptions.Reset` specifically for
+undoing those partial test side effects. The old fixture omitted that callback.
+
+The accounting-only, unattached fixture now snapshots/restores per-CPU global and
+rule counters plus its source count before replay. Production counters/verdicts
+are unchanged and assertions still require exact totals. A directed SIGUSR1 test
+forces an interrupted syscall and verifies exactly 1,000,000 rule/source decisions
+after replay. Both accounting tests passed five consecutive runs; each signal
+fixture actually observed a replay. No assertion tolerance or retry-until-green
+test policy was added.
+
+## A: full production map capacity and exhaustion recovery
+
+```sh
+sudo env TC_BPF_TEST=1 TC_BPF_CAPACITY=1 go test -count=1 -v \
+  ./internal/dataplane -run TestKernelFullStateCapacity
+```
+
+This opt-in test refuses less than 1.5 GiB available host memory. It fills actual
+production capacities in bounded batches, checks active-state preservation and
+health diagnostics at exhaustion, creates one free/expired slot, then verifies
+successful kernel insertion/reclamation and no further health failures. It uses
+test-run only, never a host interface.
+
+Measured on Ubuntu 24.04 / WSL x86-64 Linux 6.18.58.1:
+
+| Map | Entries | Kernel fdinfo memlock bytes | Fill | Full-active packet | Recovery packet |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| sources | 1,048,576 | 109,053,056 | 1.752 s | 0.234 ms | 0.014 ms |
+| jail | 1,048,576 | 125,830,272 | 1.519 s | 678.700 ms | 99.401 ms |
+| scans | 65,536 | 545,784,960 | 1.761 s | 18.631 ms | 9.297 ms |
+
+`fdinfo` is the kernel's map memory accounting, not isolated resident memory.
+The test also reports host MemAvailable deltas, explicitly labeled non-isolated;
+allocator caches and unrelated host activity make them unsuitable for attributing
+exact RSS to a map. In particular the full-active jail collector is expensive;
+these results do not establish a wire-rate guarantee under exhausted state.
+
+## Still requires external/native validation
+
+- Native Ubuntu 24.04 / Linux 6.8 x86-64 with four CPUs. This workspace is WSL
+  Linux 6.18; a CPU-emulated 6.8 loader test is not native target acceptance.
+- Physical NIC/flood throughput on the target. Private-veth measurements must be
+  labeled as such, not promoted to NIC line rate.
+- A green follow-up branch does not change main until the maintainer reviews and
+  merges it. No direct main push or automatic issue closure is appropriate.
+- Resource exhaustion tests above concern map capacity, not arbitrary system-wide
+  OOM. They deliberately do not exhaust the developer's host memory.
