@@ -87,6 +87,17 @@ Stop must release the daemon's descriptors, XDP, socket and HTTP port. Fast defa
 smoke passed: 12 cycles, maximum reload **178 ms**, maximum-policy reload **347 ms**,
 10,000-prefix reload **124 ms**, with all sent stable-pass frames accounted for.
 
+The first five-minute run completed 1,099 adversarial reload/live-set cycles and
+4,388,576 exact stable-pass frames, max reload 929 ms, RSS 45,036/45,776/45,320 KiB
+(start/peak/end). Its subsequent maximum-limit phase exceeded one second, so the
+whole suite was **not** accepted as passing. Candidate construction now overlaps
+verification with independent private inner-map allocation rather than adding
+their costs serially. Every worker is joined on success/failure before publication
+or return; a forced-invalid-program test verifies no descriptor leaks and active
+policy preservation while 63 allocation jobs are outstanding. A subsequent
+ten-changed-64-limit test under four-CPU traffic passed, max **854 ms**. The command
+assertions remain strictly below one second.
+
 ## Still requires external/native validation
 
 - Native Ubuntu 24.04 / Linux 6.8 x86-64 with four CPUs. This workspace is WSL

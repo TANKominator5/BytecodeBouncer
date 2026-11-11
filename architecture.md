@@ -79,6 +79,9 @@ reload budget; each rule still owns a separate LRU with at least 65,536 usable
 source entries, plus 128 allocated slots per possible CPU for kernel free-node
 reserves. The existing
 template serves the first rule. All preparation workers finish before publication.
+Independent private inner-map allocation overlaps verification. Both normal and
+failed candidates join the bounded worker group before returning or publishing;
+this reduces maximum-policy latency without reusing in-flight mutable state.
 
 A complete candidate is parsed and validated before active state changes. A
 packet must select one complete immutable configuration, including rules and set
