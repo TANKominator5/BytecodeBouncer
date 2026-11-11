@@ -20,6 +20,8 @@ acceptance. See [integration validation](integration-validation.md) and
 - [x] Bounce MAC-only mutation and unchanged honeypot redirect (private veth wire checks).
 - [x] Exact per-rule/global counters, exact source ranking and numeric ordering.
   - [x] Four-CPU kernel/source accounting plus deterministic CLI/HTTP equivalence.
+  - [x] Interrupted test-run replay regression; exact assertions retained.
+  - [x] Full source/jail/scan capacities and exhaustion/recovery (WSL; see follow-up evidence).
 - [x] Atomic reload, safe old-object lifetime, persistence, fresh rule counters.
   - [ ] Long-run reclamation and worst-case Linux 6.8 reload timing.
 - [x] Event ABI, lossless sustained daemon logging above 20k/s, newest 1000 history/log.
