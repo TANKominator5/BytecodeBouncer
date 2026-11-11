@@ -159,6 +159,53 @@ containers instead of relabeling them as target evidence. It rejects this actual
 workspace before running tests. `--local` records an explicitly non-target run;
 it does not bypass failing tests. Only a fully passing suite writes `result.txt`.
 
+## CI: dependency-download outage and final runs
+
+Seven consecutive runs failed in the dependency step, before build or tests:
+
+- [43034289287](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43034289287),
+  [43036721534](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43036721534),
+  [43038204018](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43038204018),
+  and [43038203964](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43038203964)
+  reported `Temporary failure resolving 'archive.ubuntu.com'` /
+  `'security.ubuntu.com'` (the last two on a re-run attempt).
+- [43041755241](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43041755241),
+  [43041754651](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43041754651)
+  and [43041754711](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43041754711)
+  failed the same way after switching the runner mirror file to canonical
+  `archive.ubuntu.com`/`security.ubuntu.com`.
+
+The earlier failure was not an Azure-only mirror problem. A public resolver
+returned a server failure for `archive.ubuntu.com` ("all name servers for zone
+unresponsive"), so pointing apt at canonical Ubuntu hostnames could not succeed.
+`mirrors.edge.kernel.org` has independent DNS and served current signed indexes
+for every required suite. Its `noble-updates` index verifies with the distribution
+keyring: `Good signature from "Ubuntu Archive Automatic Signing Key (2018)"`.
+No key, signature or repository-authentication check was bypassed or disabled.
+
+The workflow now writes that HTTPS mirror to the runner's mirror file when
+present, keeps Ubuntu's signed repositories, sets `APT::Update::Error-Mode=any` so
+missing/stale indexes fail instead of being silently reused, bounds retries and
+HTTPS timeouts, caps the install step at five minutes, and cancels superseded
+same-branch runs. Build, race/vet, unit and all integration/kernel steps remain
+unchanged and enabled. The first attempt (`archive.ubuntu.com`) is superseded, not
+retained as a fallback that would reproduce the outage.
+
+Validated on C first: [43084644782](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43084644782)
+passed every step, including dependency install, build, `make test`, bootstrap,
+demo, firewall, lifecycle and the privileged kernel suite. The identical workflow
+was then applied to A and B, and all three branches passed:
+
+| Branch | Run |
+| --- | --- |
+| `fix/dataplane-acceptance` (A) | [43085088325](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43085088325) |
+| `feat/control-plane-acceptance` (B) | [43085154194](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43085154194) |
+| `feat/verification-acceptance` (C) | [43085221084](https://github.com/TANKominator5/BytecodeBouncer/actions/runs/43085221084) |
+
+`main` remains red only until one of these is merged; its recorded failure is the
+exact-accounting regression fixed on A. The mirror line is CI infrastructure, not
+a product/runtime dependency or a change to the documented build prerequisites.
+
 ## Still requires external/native validation
 
 - Native Ubuntu 24.04 / Linux 6.8 x86-64 with four CPUs. This workspace is WSL
