@@ -98,6 +98,14 @@ policy preservation while 63 allocation jobs are outstanding. A subsequent
 ten-changed-64-limit test under four-CPU traffic passed, max **854 ms**. The command
 assertions remain strictly below one second.
 
+The complete five-minute rerun after overlapping preparation **passed**: 1,149
+reload/live-set cycles, 4,623,168 exact stable-pass frames, max ordinary reload
+456 ms; all ten changed 64-limit reloads under four-CPU traffic passed, max
+968 ms, with 33,632 exact stable-pass frames. RSS was 45,148/45,708/45,700 KiB
+(start/peak/end). The 10,000-prefix reload took 285 ms. Stop released descriptors,
+socket, HTTP and XDP; the private namespace was removed. These are WSL results,
+not proof of every possible timing under arbitrary load or of native 6.8 acceptance.
+
 ## Still requires external/native validation
 
 - Native Ubuntu 24.04 / Linux 6.8 x86-64 with four CPUs. This workspace is WSL
