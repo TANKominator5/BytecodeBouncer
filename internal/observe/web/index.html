@@ -4,35 +4,182 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Bytecode Bouncer · Trafficcop</title>
+  <title>Trafficcop · Bytecode Bouncer</title>
   <link rel="stylesheet" href="/app.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <div class="bouncer" aria-hidden="true">▟▙<br>▜▛</div>
-    <div><p class="eyebrow">PIXEL ARCADE / NETWORK OPERATIONS</p><h1>BYTECODE <span>BOUNCER</span></h1><p class="subtitle">Keep the cheaters out. Keep the players in.</p></div>
-    <div class="connection"><span class="led" id="led" aria-hidden="true"></span><p id="status" role="status">Connecting…</p><small id="generation">Policy —</small></div>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Trafficcop dashboard">
+      <span class="brand-mark" aria-hidden="true">TC</span>
+      <span>trafficcop<span class="cursor" aria-hidden="true"></span></span>
+    </a>
+    <div class="connection" aria-live="polite">
+      <span class="led" id="led" aria-hidden="true"></span>
+      <span id="status" role="status">CONNECTING</span>
+      <span class="separator" aria-hidden="true">/</span>
+      <span id="generation">POLICY —</span>
+    </div>
   </header>
+
   <main>
     <p id="warning" class="warning" role="alert" hidden></p>
-    <section class="scoreboard" aria-label="Traffic overview">
-      <article class="metric green"><h2>PASS / SEC</h2><strong id="pass-rate">—</strong><p><span id="passed">0</span> total passed</p></article>
-      <article class="metric red"><h2>DROP / SEC</h2><strong id="drop-rate">—</strong><p><span id="dropped">0</span> total dropped</p></article>
-      <article class="metric orange"><h2>BOUNCED</h2><strong id="bounced">0</strong><p>MAC swap · XDP_TX</p></article>
-      <article class="metric blue"><h2>HONEYPOTTED</h2><strong id="honeypotted">0</strong><p>Unchanged · XDP_REDIRECT</p></article>
-    </section>
-    <section class="panel" aria-labelledby="rules-heading">
-      <div class="panel-heading"><h2 id="rules-heading">01 / HOUSE RULES</h2><span>First match wins</span></div>
-      <div class="scroll"><table><caption class="sr-only">Current policy rule accounting</caption><thead><tr><th scope="col">LINE</th><th scope="col">HITS</th><th scope="col">PASS</th><th scope="col">DROP</th><th scope="col">BOUNCE</th><th scope="col">HONEYPOT</th></tr></thead><tbody id="rules"></tbody></table></div>
-    </section>
-    <div class="columns">
-      <section class="panel" aria-labelledby="sources-heading"><div class="panel-heading"><h2 id="sources-heading">02 / NOISIEST PLAYERS</h2><span>Top 5 sources</span></div><div class="scroll"><table><caption class="sr-only">Sources ranked by packet count</caption><thead><tr><th scope="col">SOURCE</th><th scope="col">PACKETS</th></tr></thead><tbody id="sources"></tbody></table></div></section>
-      <section class="panel" aria-labelledby="jail-heading"><div class="panel-heading"><h2 id="jail-heading">03 / TIMEOUT CORNER</h2><span id="jail-count">0 jailed</span></div><div class="scroll"><table><caption class="sr-only">Currently jailed sources</caption><thead><tr><th scope="col">SOURCE</th><th scope="col">SECONDS LEFT</th></tr></thead><tbody id="jail"></tbody></table></div></section>
+
+    <div class="primary-grid">
+      <section class="panel traffic-panel" aria-labelledby="traffic-heading">
+        <div class="panel-heading">
+          <h1 id="traffic-heading">Packet flow</h1>
+          <div class="panel-tools">
+            <span class="panel-note">LAST 30 SAMPLES · 1S INTERVAL</span>
+            <div class="chart-toggle" role="group" aria-label="Traffic chart style">
+              <button type="button" class="chart-option" data-chart="diverging" aria-pressed="true" aria-label="Diverging chart" title="Diverging chart">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M1 8h14" stroke="currentColor" stroke-width="1"/>
+                  <rect x="2" y="2" width="2.5" height="6" fill="currentColor"/>
+                  <rect x="6.75" y="8" width="2.5" height="5" fill="currentColor"/>
+                  <rect x="11.5" y="4" width="2.5" height="4" fill="currentColor"/>
+                </svg>
+              </button>
+              <button type="button" class="chart-option" data-chart="stacked" aria-pressed="false" aria-label="Stacked bar chart" title="Stacked bar chart">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M1 14h14" stroke="currentColor" stroke-width="1"/>
+                  <rect x="2" y="8" width="2.5" height="6" fill="currentColor" opacity=".45"/>
+                  <rect x="2" y="4" width="2.5" height="4" fill="currentColor"/>
+                  <rect x="6.75" y="6" width="2.5" height="8" fill="currentColor" opacity=".45"/>
+                  <rect x="6.75" y="2" width="2.5" height="4" fill="currentColor"/>
+                  <rect x="11.5" y="9" width="2.5" height="5" fill="currentColor" opacity=".45"/>
+                  <rect x="11.5" y="6" width="2.5" height="3" fill="currentColor"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="traffic-summary" aria-label="Current packet rates">
+          <div class="rate pass-rate">
+            <span class="direction" aria-hidden="true">↑</span>
+            <span>PASS / SEC</span>
+            <strong id="pass-rate">—</strong>
+          </div>
+          <div class="rate drop-rate">
+            <span class="direction" aria-hidden="true">↓</span>
+            <span>DROP / SEC</span>
+            <strong id="drop-rate">—</strong>
+          </div>
+          <div class="rate auxiliary">
+            <span>BOUNCED</span>
+            <strong id="bounced">0</strong>
+          </div>
+          <div class="rate auxiliary">
+            <span>HONEYPOTTED</span>
+            <strong id="honeypotted">0</strong>
+          </div>
+        </div>
+        <figure class="traffic-figure" aria-labelledby="traffic-heading">
+          <div class="axis-labels" aria-hidden="true">
+            <span id="axis-pass">PASS ↑</span>
+            <span id="axis-middle">0</span>
+            <span id="axis-drop">DROP ↓</span>
+          </div>
+          <div class="plot" id="traffic-chart" role="img" aria-label="Waiting for traffic samples">
+            <div class="plot-grid" aria-hidden="true"></div>
+            <div class="zero-line" aria-hidden="true"></div>
+            <div class="samples" id="chart-samples" aria-hidden="true"></div>
+            <p class="chart-state" id="chart-state">WAITING FOR RATE SAMPLE</p>
+          </div>
+        </figure>
+      </section>
+
+      <section class="panel rules-panel" aria-labelledby="rules-heading">
+        <div class="panel-heading">
+          <h2 id="rules-heading">Rule activity</h2>
+          <span class="panel-note">FIRST MATCH WINS</span>
+        </div>
+        <div class="table-scroll">
+          <table class="rules-table">
+            <caption class="sr-only">Rule hits and verdict counts in policy order</caption>
+            <thead>
+              <tr>
+                <th scope="col">LINE</th>
+                <th scope="col">ACTIVITY / HITS</th>
+                <th scope="col">PASS</th>
+                <th scope="col">DROP</th>
+                <th scope="col">BOUNCE</th>
+                <th scope="col">TRAP</th>
+              </tr>
+            </thead>
+            <tbody id="rules"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
-    <section class="panel" aria-labelledby="events-heading"><div class="panel-heading"><h2 id="events-heading">04 / DOOR LOG</h2><span>Latest 20 logged decisions</span></div><div class="scroll"><table><caption class="sr-only">Latest logged decisions, oldest first</caption><thead><tr><th scope="col">LINE</th><th scope="col">VERDICT</th><th scope="col">SOURCE</th><th scope="col">DESTINATION</th><th scope="col">PROTOCOL</th><th scope="col">SPORT</th><th scope="col">DPORT</th></tr></thead><tbody id="events"></tbody></table></div></section>
-    <section class="details" aria-label="Packet classification"><p>Malformed <strong id="malformed">0</strong></p><p>Other / non-IP <strong id="other">0</strong></p><p>Jail drops <strong id="jailed">0</strong></p><p>Default hits <strong id="default-hits">0</strong></p><p id="sets">Address sets: —</p></section>
+
+    <div class="secondary-grid">
+      <section class="panel sources-panel" aria-labelledby="sources-heading">
+        <div class="panel-heading">
+          <h2 id="sources-heading">Noisiest sources</h2>
+          <span class="panel-note">TOP 5 · PACKETS</span>
+        </div>
+        <ol class="source-list" id="sources" aria-label="Top sources by packet count"></ol>
+      </section>
+
+      <section class="panel jail-panel" aria-labelledby="jail-heading">
+        <div class="panel-heading">
+          <h2 id="jail-heading">Timeout corner</h2>
+          <span class="panel-note" id="jail-count">0 JAILED</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <caption class="sr-only">Currently jailed sources and time remaining</caption>
+            <thead>
+              <tr>
+                <th scope="col">SOURCE ADDRESS</th>
+                <th scope="col">TIME LEFT</th>
+              </tr>
+            </thead>
+            <tbody id="jail"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel events-panel" aria-labelledby="events-heading">
+      <div class="panel-heading">
+        <h2 id="events-heading">Recent events</h2>
+        <span class="panel-note">LATEST 20 LOGGED DECISIONS</span>
+      </div>
+      <div class="table-scroll event-scroll">
+        <table class="events-table">
+          <caption class="sr-only">Latest logged rule decisions, oldest first</caption>
+          <thead>
+            <tr>
+              <th scope="col">LINE</th>
+              <th scope="col">VERDICT</th>
+              <th scope="col">SOURCE</th>
+              <th scope="col">DESTINATION</th>
+              <th scope="col">PROTO</th>
+              <th scope="col">SPORT</th>
+              <th scope="col">DPORT</th>
+            </tr>
+          </thead>
+          <tbody id="events"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="telemetry-strip" aria-label="Packet classification and telemetry health">
+      <div class="strip-title"><p class="kicker">SYSTEM TELEMETRY</p><p id="health-summary">CHECKING</p></div>
+      <div class="detail-metric"><span>MALFORMED</span><strong id="malformed">0</strong></div>
+      <div class="detail-metric"><span>OTHER / NON-IP</span><strong id="other">0</strong></div>
+      <div class="detail-metric"><span>JAIL DROPS</span><strong id="jailed">0</strong></div>
+      <div class="detail-metric"><span>DEFAULT HITS</span><strong id="default-hits">0</strong></div>
+      <div class="detail-metric sets-metric"><span>ADDRESS SETS</span><strong id="sets">—</strong></div>
+      <div class="detail-metric"><span>EVENTS LOST</span><strong id="event-lost">0</strong></div>
+    </section>
   </main>
-  <footer><span>TRAFFICCOP · EVERY VERDICT IN XDP</span><span>Auto-updates every second · <a href="/stats.json">stats.json</a> · <a href="/health.json">diagnostics</a></span></footer>
+
+  <footer>
+    <span>TRAFFICCOP · EVERY VERDICT IN XDP</span>
+    <span>REFRESH 1S · <a href="/stats.json">STATS JSON</a> · <a href="/health.json">HEALTH</a></span>
+  </footer>
 </body>
 </html>

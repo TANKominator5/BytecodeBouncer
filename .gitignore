@@ -1,3 +1,5 @@
 /trafficcop
 /internal/dataplane/trafficcop.bpf.o
 *.log
+__pycache__/
+*.pyc

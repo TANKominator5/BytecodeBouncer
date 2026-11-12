@@ -44,10 +44,10 @@ func TestTelemetryHTTP(t *testing.T) {
 	}
 	r = httptest.NewRecorder()
 	h.ServeHTTP(r, httptest.NewRequest("GET", "/", nil))
-	if r.Code != 200 || !strings.Contains(r.Body.String(), "TIMEOUT CORNER") || r.Header().Get("Content-Security-Policy") == "" {
+	if r.Code != 200 || !strings.Contains(r.Body.String(), `id="traffic-chart"`) || !strings.Contains(r.Body.String(), "Timeout corner") || !strings.Contains(r.Body.String(), "Recent events") || r.Header().Get("Content-Security-Policy") == "" {
 		t.Fatal("dashboard/security headers")
 	}
-	for _, path := range []string{"/app.js", "/app.css"} {
+	for _, path := range []string{"/app.js", "/app.css", "/fonts/monocraft-regular.ttf", "/fonts/monocraft-bold.ttf"} {
 		r := httptest.NewRecorder()
 		h.ServeHTTP(r, httptest.NewRequest("GET", path, nil))
 		if r.Code != 200 {
