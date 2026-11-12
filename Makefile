@@ -7,6 +7,7 @@ internal/dataplane/trafficcop.bpf.o: bpf/trafficcop.bpf.c $(wildcard bpf/*.h) in
 trafficcop: internal/dataplane/trafficcop.bpf.o $(shell find cmd internal -name '*.go' -o -path '*/web/*') go.mod go.sum
 	CGO_ENABLED=0 go build -trimpath -o $@ ./cmd/trafficcop
 test: all
+	bash tests/integration/native-target-test.sh
 	bash bpf/test.sh
 	go test -race ./...
 	go vet ./...

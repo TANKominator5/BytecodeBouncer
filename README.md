@@ -183,3 +183,10 @@ concurrent/slow HTTP clients. These are local measurements, not a flood/NIC
 throughput ranking or a Linux 6.8 guarantee. CI is configured for the expanded
 smoke suite on Ubuntu 24.04; inspect its result after publishing rather than
 assuming it passed.
+
+Target acceptance via `tests/integration/acceptance.sh` requires a native Ubuntu
+24.04 x86-64 host running Linux 6.8 with at least four allowed CPUs. It requires
+`systemd-detect-virt` to report `none` with its normal exit status (1); missing
+or failing detection, containers, virtual machines and emulation are rejected.
+Use `--local` only for explicitly non-target evidence. Target acceptance remains
+unverified; see [the specification checklist](docs/spec-checklist.md).

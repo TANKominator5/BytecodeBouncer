@@ -29,7 +29,9 @@ acceptance. See [integration validation](integration-validation.md) and
 - [x] Event ABI, lossless sustained daemon logging above 20k/s, newest 1000 history/log.
 - [x] Complete dashboard panels, pps, jail and latest events; real browser screenshot.
 - [x] CLI grammar/timings/error behavior and failed-start rollback tests (local fixtures).
-- [ ] Fresh Ubuntu 24.04 x86-64 build/runtime and four-CPU stress verification.
+- [ ] Fresh native Ubuntu 24.04 x86-64 build/runtime and four-CPU stress verification.
+  The acceptance runner rejects containers, VMs, emulation and unavailable or
+  failed virtualization detection; mocked detector checks are not target evidence.
 - [ ] Benchmark, README test evidence and actual dashboard screenshot.
   - [x] README, sustained logging/reload measurements and actual dashboard screenshot.
   - [ ] Target flood speed/NIC throughput benchmark.

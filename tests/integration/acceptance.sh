@@ -10,9 +10,9 @@ mode=${1:---require-target}
 if [[ $mode == --require-target ]]; then
     . /etc/os-release
     kernel=$(uname -r)
-    virtualization=$(systemd-detect-virt 2>/dev/null || true)
+    . tests/integration/native-target.sh
     [[ $ID == ubuntu && $VERSION_ID == 24.04 && $(uname -m) == x86_64 && $kernel == 6.8.* && $kernel != *microsoft* && $kernel != *WSL* ]] &&
-        [[ ! $virtualization =~ ^(wsl|qemu|docker|podman|lxc|uml)$ ]] || {
+        is_native_target || {
         echo 'target required: native Ubuntu 24.04 / Linux 6.8 / x86-64; this environment does not qualify (use --local for explicitly non-target evidence)' >&2; exit 1;
     }
     (( $(nproc) >= 4 )) || { echo 'target acceptance requires four allowed CPUs' >&2; exit 1; }
