@@ -37,3 +37,5 @@ acceptance. See [integration validation](integration-validation.md) and
   - [ ] Target flood speed/NIC throughput benchmark.
   - [x] Sustained four-CPU private-veth flood, exact verdict totals and recorded method.
   - [ ] All full-capacity CLI deadlines: million-entry jail timeout/stats timing remain open.
+    - [x] Linux 6.8 VM component profiles, radix aggregation and framed IPC regressions;
+      full-map acceptance still blocked ([details](cli-performance-validation.md)).

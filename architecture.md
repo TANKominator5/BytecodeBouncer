@@ -74,6 +74,11 @@ lifetime. All source/jail map reads use batches; jail reads take BPF_F_LOCK.
 Full stats reads source/jail maps concurrently while retaining the generation
 read lock until both complete, including error paths. Stats counts distinct active
 jails without formatting/sorting the separate jail-list response.
+Large jail snapshots use numeric stable byte-radix ordering; stats deduplicates
+identities in that order instead of building a million-key hash table. Private
+control replies use a versioned, bounded JSON header and length-delimited JSON
+payload, avoiding envelope re-encoding and client rescanning of large responses.
+CLI and HTTP public JSON layouts are unchanged. Restart on binary upgrades.
 Private limit-map allocation uses at most four workers to meet the measured
 reload budget; each rule still owns a separate LRU with at least 65,536 usable
 source entries, plus 128 allocated slots per possible CPU for kernel free-node

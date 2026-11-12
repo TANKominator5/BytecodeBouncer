@@ -38,6 +38,10 @@ make throughput # separate four-CPU private-veth flood; not physical-NIC line ra
 make capacity
 ```
 
+The full-capacity CLI optimization and Linux 6.8 VM component measurements are
+documented in [CLI performance validation](docs/cli-performance-validation.md).
+Restart the daemon after upgrading: private IPC framing changed; public JSON did not.
+
 Integration/stress tests create private namespaces/veths and attempt cleanup on
 every exit. They refuse an existing daemon. No tests replace a host attachment.
 Do not deploy on a production interface without target-platform verification.
