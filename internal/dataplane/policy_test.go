@@ -52,6 +52,15 @@ type testScan = contract.ScanValue
 type testEvent = contract.EventRecord
 
 func TestPolicyABI(t *testing.T) {
+	header, err := os.ReadFile("../../include/contract.h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, define := range []string{fmt.Sprintf("#define TC_ABI_VERSION %d", contract.ABIVersion), fmt.Sprintf("#define TC_GC_IDLE %dULL", contract.GCIdle), fmt.Sprintf("#define TC_GC_BUSY %dULL", contract.GCBusy), fmt.Sprintf("#define TC_GC_REQUESTED %dULL", contract.GCRequested), fmt.Sprintf("#define TC_GC_BATCH %d", contract.GCBatch)} {
+		if !strings.Contains(string(header), define+"\n") && !strings.Contains(string(header), define+"\r\n") {
+			t.Fatalf("C/Go semantic ABI mismatch: %s", define)
+		}
+	}
 	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(object))
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +74,7 @@ func TestPolicyABI(t *testing.T) {
 		{"config", ebpf.Array, 1, uint32(0), testConfig{}},
 		{"rule_counters", ebpf.PerCPUArray, 64, uint32(0), testRuleCounters{}},
 		{"health", ebpf.PerCPUArray, 1, uint32(0), testHealth{}},
+		{"maintenance", ebpf.Array, 2, uint32(0), uint64(0)},
 		{"sources", ebpf.Hash, 1048576, testAddress{}, uint64(0)},
 		{"jail", ebpf.Hash, 1048576, testAddress{}, testJail{}},
 		{"scans", ebpf.Hash, 65536, testAddress{}, testScan{}},
@@ -82,6 +92,16 @@ func TestPolicyABI(t *testing.T) {
 	}
 	if spec.Maps["events"].Type != ebpf.RingBuf || spec.Maps["events"].MaxEntries != 1<<24 {
 		t.Fatal("event ring ABI")
+	}
+	for _, name := range []string{"reclaim_jail_command", "reclaim_scan_command"} {
+		if spec.Programs[name] == nil || spec.Programs[name].Type != ebpf.XDP {
+			t.Fatalf("missing control-only collector %s", name)
+		}
+	}
+	for _, ins := range spec.Programs["trafficcop"].Instructions {
+		if ins.IsBuiltinCall() && ins.Constant == int64(asm.FnForEachMapElem) {
+			t.Fatal("map sweep returned to ingress program")
+		}
 	}
 	// Check member offsets as well as aggregate sizes (padding bugs can preserve size).
 	var rule *btf.Struct
@@ -164,7 +184,7 @@ func loadPolicySized(t *testing.T, config testConfig, shared map[string]*ebpf.Ma
 	if err != nil {
 		// Branch-level logs are expensive on success; retry only a failed load
 		// to preserve the exact verifier rejection and register state.
-		diagnostic, detailedErr := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: shared, Programs: ebpf.ProgramOptions{LogLevel: ebpf.LogLevelBranch | ebpf.LogLevelStats}})
+		diagnostic, detailedErr := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: shared, Programs: ebpf.ProgramOptions{LogLevel: ebpf.LogLevelBranch | ebpf.LogLevelStats, LogSizeStart: 16 << 20}})
 		if diagnostic != nil {
 			diagnostic.Close()
 		}
@@ -172,6 +192,7 @@ func loadPolicySized(t *testing.T, config testConfig, shared map[string]*ebpf.Ma
 		if errors.As(detailedErr, &verifier) {
 			t.Fatalf("verifier: %+v", verifier)
 		}
+		t.Logf("detailed loader error: %+v", detailedErr)
 		t.Fatalf("load XDP (verifier): %+v", err)
 	}
 	t.Cleanup(c.Close)
@@ -1299,6 +1320,18 @@ func TestKernelExpiredStateReclamation(t *testing.T) {
 		}
 		for i := 1; i <= 12; i++ {
 			source := fmt.Sprintf("203.0.113.%d", i)
+			// Allocation-pressure packets fail closed, request a sweep and return
+			// without walking the map. The daemon normally services this request.
+			first := ipv4(source, 17, 0, 5, udp(10))
+			verdict, _, err := c.Programs["trafficcop"].Test(first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verdict == drop {
+				collectRequested(t, c)
+			} else if verdict != pass {
+				t.Fatal(verdict)
+			}
 			for _, port := range []uint16{10, 11, 12} {
 				verdict := uint32(pass)
 				if port == 12 {
@@ -1306,6 +1339,8 @@ func TestKernelExpiredStateReclamation(t *testing.T) {
 				}
 				runPacket(t, c, ipv4(source, 17, 0, 5, udp(port)), verdict)
 			}
+			collectRequested(t, c)
+			runPacket(t, c, ipv4(source, 17, 0, 5, udp(12)), drop)
 			// Model expiry while keeping the map full; the next identity must reclaim.
 			var scan testScan
 			if err := c.Maps["scans"].LookupWithFlags(addr(source), &scan, ebpf.LookupLock); err != nil {
@@ -1331,7 +1366,15 @@ func TestKernelExpiredStateReclamation(t *testing.T) {
 		if kept.Count != 1 || kept.Ports[0] != (1<<7) || kept.Retired != 0 {
 			t.Fatalf("active scan changed: %+v", kept)
 		}
-		healthy(t, c)
+		h, err := readHealth(c.Maps["health"])
+		if err != nil || h.ScanFull == 0 {
+			t.Fatal(h, err)
+		}
+		h.ScanFull = 0
+		h.JailFull = 0
+		if h != (contract.Health{}) {
+			t.Fatal(h)
+		}
 	})
 	t.Run("jail-churn-preserves-active", func(t *testing.T) {
 		c := loadPolicySized(t, cfg(testRule{Action: jailAction, JailSeconds: 60, Matches: 32, DportMin: 9, DportMax: 9}), nil, 4)
@@ -1347,6 +1390,8 @@ func TestKernelExpiredStateReclamation(t *testing.T) {
 		}
 		for i := 1; i <= 12; i++ {
 			source := fmt.Sprintf("203.0.113.%d", i)
+			runPacket(t, c, ipv4(source, 17, 0, 5, udp(9)), drop)
+			collectRequested(t, c)
 			runPacket(t, c, ipv4(source, 17, 0, 5, udp(9)), drop)
 			runPacket(t, c, ipv4(source, 17, 0, 5, udp(10)), drop)
 			var jail testJail
@@ -1365,7 +1410,14 @@ func TestKernelExpiredStateReclamation(t *testing.T) {
 		if kept.UntilNS != keep.UntilNS || kept.Retired != 0 {
 			t.Fatalf("active jail changed: %+v", kept)
 		}
-		healthy(t, c)
+		h, err := readHealth(c.Maps["health"])
+		if err != nil || h.JailFull == 0 {
+			t.Fatal(h, err)
+		}
+		h.JailFull = 0
+		if h != (contract.Health{}) {
+			t.Fatal(h)
+		}
 	})
 	t.Run("full-active-scan-fails-closed", func(t *testing.T) {
 		conf := cfg()
@@ -1406,6 +1458,8 @@ func TestKernelPendingScanJail(t *testing.T) {
 	if err := c.Maps["maintenance"].Put(uint32(0), uint64(0)); err != nil {
 		t.Fatal(err)
 	}
+	runPacket(t, c, frame(7), drop)
+	collectRequested(t, c)
 	runPacket(t, c, frame(7), drop)
 	var jail testJail
 	if err := c.Maps["jail"].LookupWithFlags(addr("192.0.2.1"), &jail, ebpf.LookupLock); err != nil {
@@ -1525,6 +1579,8 @@ func TestKernelUnjailCancelsPendingScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	runPacket(t, c, ipv4("192.0.2.1", 1, 0, 5, make([]byte, 8)), drop)
+	collectRequested(t, c)
+	runPacket(t, c, ipv4("192.0.2.1", 1, 0, 5, make([]byte, 8)), drop)
 	type request = contract.UnjailRequest
 	if err := c.Maps["unjail_request"].Put(uint32(0), request{Src: src}); err != nil {
 		t.Fatal(err)
@@ -1554,6 +1610,7 @@ func TestKernelCancellationReclamation(t *testing.T) {
 	}
 	frame := ipv4("192.0.2.2", 17, 0, 5, udp(9))
 	runPacket(t, c, frame, drop)
+	collectRequested(t, c)
 	var kept testJail
 	if err := c.Maps["jail"].LookupWithFlags(old, &kept, ebpf.LookupLock); err != nil {
 		t.Fatal("live cancellation reclaimed:", err)
@@ -1571,6 +1628,8 @@ func TestKernelCancellationReclamation(t *testing.T) {
 		if err := c.Maps["jail"].Update(old, state, ebpf.UpdateLock); err != nil {
 			t.Fatal(err)
 		}
+		runPacket(t, c, frame, drop)
+		collectRequested(t, c)
 		runPacket(t, c, frame, drop)
 		if err := c.Maps["jail"].LookupWithFlags(addr("192.0.2.2"), &kept, ebpf.LookupLock); err != nil {
 			t.Fatal("expired cancellation was not reclaimed:", err)

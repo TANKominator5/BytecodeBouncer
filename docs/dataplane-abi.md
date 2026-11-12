@@ -1,4 +1,4 @@
-# Person A dataplane handoff (ABI v5)
+# Person A dataplane handoff (ABI v6)
 
 `include/contract.h` is the authoritative layout. Shared changes were authorized
 by the task owner; B/C review is still required before merge. A also adds kernel
@@ -30,13 +30,17 @@ Pass these persistent maps to `NewCollectionWithOptions` / `MapReplacements`:
 | --- | --- |
 | counters | cumulative per-CPU totals |
 | health | cumulative per-CPU diagnostic failures |
-| maintenance | serialized jail/scan reclamation; share whenever jail is shared |
+| maintenance | coalesced jail/scan reclamation requests; share whenever jail is shared |
 | sources | full-address cumulative atomic packet counts |
 | jail | full-address locked release times |
 | events | single ordered ring, one continuous consumer |
 
 Other maps (`config`, `rule_counters`, `sets`, `buckets`, `scans`) belong to one
 generation. Scan windows and buckets restart on reload; jail/history do not.
+ABI v6 changes maintenance semantics, **not record sizes/offsets**: u64 values
+are `TC_GC_IDLE=0`, `TC_GC_BUSY=1`, `TC_GC_REQUESTED=2`. Control-only
+`reclaim_jail_command` / `reclaim_scan_command` consume requests. Never combine
+the v6 loader/worker with a v5 object. Restart the daemon on upgrade.
 ABI v5 reuses the jail value's former reserved word as `retired` and adds
 `retired,reserved` before the scan generation plus a pending jail deadline (scan size 8,232; bitmap offset 40).
 `internal/contract/contract.go` supplies the production Go mirror and typed
@@ -144,7 +148,11 @@ See [validation](dataplane-validation.md).
 
 ## Reclamation tradeoffs
 
-Reclamation runs only when insertion fails and stops after one expired entry.
+Failed insertions coalesce a request with one compare-and-swap, without a map
+walk in the attached program. A daemon worker polls at 100 ms, invoking only
+requested control programs using test-run. Each sweep stops after 256 deletions
+or the end of the map, whichever comes first. An early saturated-count check in
+the callback is required for Linux 6.8 verifier state convergence.
 Active release times/windows are checked under their value lock, so historical
 sources no longer permanently poison a full map. A serial collector plus a
 retirement marker protects stale RCU readers from reviving a deleted value.
@@ -152,8 +160,20 @@ A contending collector may temporarily prevent an insertion; scan allocation or
 retirement failure is a diagnostic DROP, not a bypass or a jailed counter hit.
 The bounded jail writer retries four times and reports jail_full on exhaustion.
 Fully active capacity exhaustion remains a resource failure, not a claim of
-unlimited state. Scanning a full active map can be costly; measure worst-case
-pressure on the target, and do not claim a packet-rate bound for this path.
+unlimited state. Scanning a full active map can still be costly **in the worker**;
+at most one sweep per requested map per polling tick amortizes unsuccessful
+collections. It no longer happens once per new packet (or four times per jail
+writer retry). The worker clones program FDs under the plane read lock, releases
+the lock, runs the sweep, then closes the clones. Kernel references pin that
+generation, including its private scan map/config. Shutdown joins the worker
+before closing live resources; collection errors are exposed by ReadHealth.
+
+Capacity recovery is asynchronous: until the worker frees slots, allocation
+failures still drop the current packet and increment jail_full/scan_full. A
+failed jail-rule insertion is a diagnostic resource failure, not a successfully
+installed jail. Scan threshold decisions retain their pending original deadline.
+No admission/line-rate guarantee at exhaustion is claimed. See
+[Linux 6.8 VM pressure evidence](reclamation-validation.md).
 
 ## Atomic unjail command (Person B)
 

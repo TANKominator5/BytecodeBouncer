@@ -6,11 +6,12 @@
  * expired entry retired under its lock before deleting it; writers retry instead
  * of extending that detached value. Only one collector deletes from each map.
  * Userspace must use the same protocol, not independently delete state entries. */
-struct reclaim_context { __u64 now, generation, window_ns; };
+struct reclaim_context { __u64 now, generation, window_ns; __u32 removed; };
 static long reclaim_jail(void *map, const void *key, void *raw, void *context)
 {
     struct tc_jail_value *value = raw;
     struct reclaim_context *gc = context;
+    if (gc->removed >= TC_GC_BATCH) return 1;
     bpf_spin_lock(&value->lock);
     /* Retain cancellation until every legal pre-release decision has expired.
      * Otherwise a captured old retry could recreate jail after reclamation. */
@@ -26,12 +27,13 @@ static long reclaim_jail(void *map, const void *key, void *raw, void *context)
         bpf_spin_unlock(&value->lock);
         return 0;
     }
-    return 1;
+    return ++gc->removed >= TC_GC_BATCH;
 }
 static long reclaim_scan(void *map, const void *key, void *raw, void *context)
 {
     struct tc_scan_value *value = raw;
     struct reclaim_context *gc = context;
+    if (gc->removed >= TC_GC_BATCH) return 1;
     bpf_spin_lock(&value->lock);
     int expired = !value->retired && value->pending_until_ns <= gc->now &&
         (value->generation != gc->generation ||
@@ -45,7 +47,7 @@ static long reclaim_scan(void *map, const void *key, void *raw, void *context)
         bpf_spin_unlock(&value->lock);
         return 0;
     }
-    return 1;
+    return ++gc->removed >= TC_GC_BATCH;
 }
 static __always_inline void reclaim_state(__u32 kind, __u64 now,
                                           const struct tc_config *cfg)
@@ -55,7 +57,7 @@ static __always_inline void reclaim_state(__u32 kind, __u64 now,
      * into one call site, which older verifiers reject as a poisoned map_ptr. */
     __u32 key = kind;
     __u64 *busy = bpf_map_lookup_elem(&maintenance, &key);
-    if (!busy || __sync_val_compare_and_swap(busy, 0, 1)) return;
+    if (!busy || __sync_val_compare_and_swap(busy, TC_GC_REQUESTED, TC_GC_BUSY) != TC_GC_REQUESTED) return;
     struct reclaim_context gc = { .now = now };
     if (kind == 0) {
         bpf_for_each_map_elem(&jail, reclaim_jail, &gc, 0);
@@ -64,7 +66,15 @@ static __always_inline void reclaim_state(__u32 kind, __u64 now,
         gc.window_ns = (__u64)cfg->scan_window_seconds * NS_PER_SECOND;
         bpf_for_each_map_elem(&scans, reclaim_scan, &gc, 0);
     }
-    __sync_val_compare_and_swap(busy, 1, 0);
+    __sync_val_compare_and_swap(busy, TC_GC_BUSY, TC_GC_IDLE);
+}
+
+/* Packet work is constant: coalesce failed insertions into one request. No map
+ * walk, userspace deletion or active-state eviction on the ingress path. */
+static __always_inline void request_reclaim(__u32 kind)
+{
+    __u64 *state = bpf_map_lookup_elem(&maintenance, &kind);
+    if (state) __sync_val_compare_and_swap(state, TC_GC_IDLE, TC_GC_REQUESTED);
 }
 
 static __always_inline void count_source(const struct tc_address *src, struct tc_health *h)
@@ -104,8 +114,7 @@ static __noinline int jail_source(const struct tc_address *src, __u64 decided, _
             struct tc_jail_value initial = { .until_ns = until };
             long inserted = bpf_map_update_elem(&jail, src, &initial, BPF_NOEXIST);
             if (inserted && inserted != -EEXIST) {
-                reclaim_state(0, bpf_ktime_get_ns(), 0);
-                bpf_map_update_elem(&jail, src, &initial, BPF_NOEXIST);
+                request_reclaim(0);
             }
             value = bpf_map_lookup_elem(&jail, src);
         }
@@ -178,8 +187,7 @@ static __always_inline int scan_source(const struct tc_packet *p, const struct t
         seed->start_ns = now;
         long inserted = bpf_map_update_elem(&scans, &p->src, seed, BPF_NOEXIST);
         if (inserted && inserted != -EEXIST) {
-            reclaim_state(1, now, cfg);
-            bpf_map_update_elem(&scans, &p->src, seed, BPF_NOEXIST);
+            request_reclaim(1);
         }
         value = bpf_map_lookup_elem(&scans, &p->src);
     }

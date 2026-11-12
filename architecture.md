@@ -48,7 +48,7 @@ logging use a common verdict-finalization path so each packet is counted once.
 `include/contract.h` is authoritative for native-endian map fields and
 network-order address bytes. Reserved bytes must be zero. Use fixed-width types,
 explicit padding, C static assertions and Go ELF/layout tests. Rule indices and
-original file line numbers are separate concepts. ABI v5 and its integration
+original file line numbers are separate concepts. ABI v6 and its integration
 protocol are documented in [docs/dataplane-abi.md](docs/dataplane-abi.md). The task
 owner authorized this shared change; B/C review remains required before merge.
 
@@ -139,12 +139,22 @@ ARM64-host testing does not replace that validation.
 
 ## Expired-state recovery
 
-Jail and scan maps reclaim expired entries on insertion pressure. A shared
-maintenance map serializes collectors; locked retirement markers prevent a
+Jail and scan maps reclaim expired entries asynchronously on insertion pressure.
+Packets only coalesce a request; they never walk a state map. A 100-ms daemon
+worker invokes control-only BPF collectors, at most one sweep per requested map
+per tick and up to 256 expired entries deleted per sweep. Failed allocations
+remain diagnostic DROPs until capacity recovers; pending scan jail decisions
+continue retrying their original deadline. A shared maintenance map serializes
+collectors; locked retirement markers prevent a
 concurrent writer from reviving a value after deletion. Share maintenance with
 jail across program replacements. Active state is never evicted. Scan allocation
 failures drop the current packet with diagnostics instead of bypassing detection.
 See the ABI handoff for finite-capacity and pressure-path performance limits.
+Worker program clones pin their original generation/config/maps without holding
+the plane lock during a sweep. Reload/CLI/snapshots do not wait on that lock for
+a full-map walk. Shutdown joins the worker before closing maps. Errors surface
+through ReadHealth instead of being silently dropped. ABI v6 keeps v5 record
+layouts but changes maintenance[0=jail,1=scan] semantics to idle/busy/requested.
 
 Unjail uses a separate, never-attached XDP control program invoked by test-run;
 it checks retirement and clears release time under one lock, rather than a
@@ -159,4 +169,4 @@ ELF/BTF tests checking their layout. Observe consumes StateReader rather than
 concrete dataplane.Plane. B supplies decoded EventReader records and map/control
 operations; C implements Telemetry snapshots/history. The daemon wires their
 lifecycle and invokes the same snapshot API for CLI and HTTP. Shared Go snapshot
-and flush-barrier additions do not alter the ABI v5 kernel layouts.
+and flush-barrier additions do not alter the kernel record layouts.

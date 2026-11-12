@@ -38,6 +38,11 @@ make throughput # separate four-CPU private-veth flood; not physical-NIC line ra
 make capacity
 ```
 
+State-map pressure now requests off-packet BPF collection instead of walking a
+full map on ingress (ABI v6; restart the daemon on upgrade). See
+[reclamation validation](docs/reclamation-validation.md) for Linux 6.8 VM results
+and the still-open four-CPU/full-capacity acceptance.
+
 Integration/stress tests create private namespaces/veths and attempt cleanup on
 every exit. They refuse an existing daemon. No tests replace a host attachment.
 Do not deploy on a production interface without target-platform verification.

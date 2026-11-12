@@ -18,7 +18,7 @@
 
 ARRAY_MAP(counters, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_counters);
 ARRAY_MAP(health, BPF_MAP_TYPE_PERCPU_ARRAY, 1, struct tc_health);
-/* One collector per state map, shared with jail across program replacements. */
+/* Coalesced maintenance requests, shared with jail across replacements. */
 ARRAY_MAP(maintenance, BPF_MAP_TYPE_ARRAY, 2, __u64);
 ARRAY_MAP(unjail_request, BPF_MAP_TYPE_ARRAY, 1, struct tc_unjail_request);
 ARRAY_MAP(config, BPF_MAP_TYPE_ARRAY, 1, struct tc_config);
@@ -152,6 +152,24 @@ SEC("xdp") int trafficcop(struct xdp_md *ctx)
     return finish(c, cfg->default_action == TC_DROP ? TC_DROP : TC_PASS);
 }
 char LICENSE[] SEC("license") = "GPL";
+
+/* Never attach these programs. A daemon maintenance worker invokes them with
+ * test-run, independent of packet processing and generation publication. All
+ * expiry/retirement/delete decisions still execute in BPF with value locks. */
+SEC("xdp") int reclaim_jail_command(struct xdp_md *ctx)
+{
+    (void)ctx;
+    reclaim_state(0, bpf_ktime_get_ns(), 0);
+    return XDP_PASS;
+}
+SEC("xdp") int reclaim_scan_command(struct xdp_md *ctx)
+{
+    (void)ctx;
+    __u32 zero = 0;
+    const struct tc_config *cfg = bpf_map_lookup_elem(&config, &zero);
+    if (cfg) reclaim_state(1, bpf_ktime_get_ns(), cfg);
+    return XDP_PASS;
+}
 
 /* Control-only program, invoked with BPF_PROG_TEST_RUN, never attached. The
  * daemon serializes requests on its private request map. Release and retirement

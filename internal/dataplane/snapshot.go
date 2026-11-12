@@ -159,6 +159,9 @@ func (p *Plane) ReadHealth() (contract.Health, error) {
 	if p.closed {
 		return contract.Health{}, fmt.Errorf("dataplane closed")
 	}
+	if p.maintenanceErr != nil {
+		return contract.Health{}, p.maintenanceErr
+	}
 	return readHealth(p.collection.Maps["health"])
 }
 func (p *Plane) ReadJail() (contract.JailState, error) {
