@@ -32,6 +32,10 @@ headers at build time. The target is x86-64 Ubuntu 24.04/Linux 6.8, four CPUs.
 make test
 make integration
 make stress
+make endurance  # separate five-minute reload/set/maximum-policy resource check
+make throughput # separate four-CPU private-veth flood; not physical-NIC line rate
+# Full-map CLI deadline check (currently exposes a million-entry jail timeout):
+make capacity
 ```
 
 Integration/stress tests create private namespaces/veths and attempt cleanup on
@@ -110,6 +114,9 @@ Finite state limits and target-platform gaps are documented in
 
 ## Dashboard
 
+Maintainer follow-up results and remaining target-hardware requirements:
+[remaining-work validation](docs/remaining-work-validation.md).
+
 Embedded HTML/CSS/JavaScript updates every second, including passed/dropped pps,
 rule hits, source ranking, jail, latest events, malformed/other and diagnostics.
 No frontend dependencies. Actual isolated-demo screenshot (traffic idle at capture,
@@ -176,3 +183,10 @@ concurrent/slow HTTP clients. These are local measurements, not a flood/NIC
 throughput ranking or a Linux 6.8 guarantee. CI is configured for the expanded
 smoke suite on Ubuntu 24.04; inspect its result after publishing rather than
 assuming it passed.
+
+Target acceptance via `tests/integration/acceptance.sh` requires a native Ubuntu
+24.04 x86-64 host running Linux 6.8 with at least four allowed CPUs. It requires
+`systemd-detect-virt` to report `none` with its normal exit status (1); missing
+or failing detection, containers, virtual machines and emulation are rejected.
+Use `--local` only for explicitly non-target evidence. Target acceptance remains
+unverified; see [the specification checklist](docs/spec-checklist.md).

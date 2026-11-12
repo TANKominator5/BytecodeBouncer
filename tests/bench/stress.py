@@ -3,6 +3,7 @@ import concurrent.futures
 import fcntl
 import ipaddress
 import json
+import os
 from pathlib import Path
 import socket
 import struct
@@ -13,6 +14,10 @@ import time
 import urllib.request
 
 root = Path(sys.argv[1])
+reloads = int(os.environ.get('TC_STRESS_RELOADS', '12'))
+minimum_seconds = float(os.environ.get('TC_STRESS_SECONDS', '0'))
+limit_reloads = int(os.environ.get('TC_STRESS_LIMIT_RELOADS', '1'))
+assert 1 <= reloads <= 10000 and 0 <= minimum_seconds <= 3600 and 1 <= limit_reloads <= 100
 
 
 def cli(*args, ok=True):
@@ -135,14 +140,18 @@ assert len(cpus) == 4, cpus
 old = root / 'policy.rules'
 new = root / 'other.rules'
 invalid = root / 'invalid.rules'
-old.write_text('default drop\nset old 2001:db8:ffff::/48\npass proto udp dport 1234\ndrop proto udp dport 4321 log\n')
-new.write_text('default drop\nset new 2001:db8:eeee::/48\npass proto udp dport 4321 log\npass proto udp dport 1234\n')
+old.write_text('default drop\nset old 2001:db8:ffff::/48\nset live\ndrop src @live log\npass proto udp dport 1234\ndrop proto udp dport 4321 log\n')
+new.write_text('default drop\nset new 2001:db8:eeee::/48\nset live\ndrop src @live log\npass proto udp dport 4321 log\npass proto udp dport 1234\n')
 invalid.write_text('drop proto invalid\n')
 cli('reload', old)
 with socket.socket(socket.AF_UNIX) as control:
     control.connect('/run/trafficcop/control.sock')
     daemon_pid = struct.unpack('3i', control.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
 fd_baseline = len(list(Path(f'/proc/{daemon_pid}/fd').iterdir()))
+def rss_kb():
+    return int(next(line.split()[1] for line in Path(f'/proc/{daemon_pid}/status').read_text().splitlines() if line.startswith('VmRSS:')))
+rss_before = rss_kb()
+rss_peak = rss_before
 workers_stop = threading.Event()
 
 
@@ -173,13 +182,22 @@ expected_marker_drops = 0
 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
     futures = [pool.submit(flood, i + 1, cpu) for i, cpu in enumerate(cpus)]
     try:
-        for iteration in range(12):
+        iteration = 0
+        while iteration < reloads or time.monotonic() - start < minimum_seconds:
             target = new if iteration % 2 == 0 else old
             t = time.monotonic()
             cli('reload', target)
             durations.append(time.monotonic() - t)
+            fresh = cli('stats')
+            assert fresh['rules'][0]['hits'] == 0, 'fresh live-set rule counters were not reset'
             if iteration % 3 == 0:
                 cli('reload', invalid, ok=False)
+            cli('set', 'add', 'live', '2001:db8::7')
+            send(sock, frame(iteration, 1234))
+            event = cli('log')[-1]
+            assert event['verdict'] == 'DROP' and event['dport'] == 1234, event
+            expected_marker_drops += 1
+            cli('set', 'del', 'live', '2001:0db8::7')
             send(sock, frame(iteration, 4321))
             event = cli('log')[-1]
             verdict = 'PASS' if target == new else 'DROP'
@@ -187,27 +205,42 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             assert event['verdict'] == verdict and event['dport'] == 4321, (iteration, event)
             s = cli('stats')
             assert s['rules_version'] == 3 + iteration, s['rules_version']
-            assert s['sets'][0]['name'] == ('new' if target == new else 'old')
+            assert {v['name']: v['prefixes'] for v in s['sets']} == {'live': 0, 'new' if target == new else 'old': 1}
             assert len(list(Path(f'/proc/{daemon_pid}/fd').iterdir())) <= fd_baseline + 2, 'retired generation descriptors retained'
+            rss_peak = max(rss_peak, rss_kb())
+            iteration += 1
     finally:
         workers_stop.set()
     sent = sum(f.result() for f in futures)
 time.sleep(.05)
 after = cli('stats')
 assert after['dropped'] - before['dropped'] == expected_marker_drops, (before, after)
-assert after['passed'] - before['passed'] == sent + 12 - expected_marker_drops, (sent, before, after)
+assert after['passed'] - before['passed'] == sent + 2 * iteration - expected_marker_drops, (sent, before, after)
 health = web('health.json')
 assert not any(v for k, v in health.items() if k != 'events_read'), health
 assert web('stats.json') == after
-print(f'PASS: 12 adversarial CLI reloads with {sent} stable-pass frames across CPUs {cpus}; exact total accounting, no unexpected drop, new policy/version/sets after return; reload max={max(durations):.3f}s')
+assert rss_kb() <= rss_before + 64 * 1024, ('daemon RSS grew without bound', rss_before, rss_kb())
+print(f'PASS: {iteration} adversarial CLI reloads/live-set cycles in {time.monotonic()-start:.1f}s with {sent} stable-pass frames across CPUs {cpus}; exact totals, bounded descriptors; reload max={max(durations):.3f}s; daemon RSS start/peak/end KiB={rss_before}/{rss_peak}/{rss_kb()}')
 
 # Measure largest rule count and isolated bucket allocation on real CLI reload.
-old.write_text('default pass\n' + ''.join(f'limit 1000000/s burst 1000000 proto udp dport {10000 + i}\n' for i in range(64)))
-start = time.monotonic()
-cli('reload', old)
-elapsed = time.monotonic() - start
-assert len(cli('stats')['rules']) == 64
-print(f'PASS: 64-limit-rule production CLI reload completed in {elapsed:.3f}s')
+workers_stop.clear()
+before = cli('stats')
+limit_times = []
+with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    futures = [pool.submit(flood, i + 1, cpu) for i, cpu in enumerate(cpus)]
+    try:
+        for generation in range(limit_reloads):
+            old.write_text('default pass\n' + ''.join(f'limit {1000000-generation}/s burst {1000000-generation} proto udp dport {10000 + i}\n' for i in range(64)))
+            start = time.monotonic()
+            cli('reload', old)
+            limit_times.append(time.monotonic() - start)
+            assert len(cli('stats')['rules']) == 64
+    finally:
+        workers_stop.set()
+    sent = sum(f.result() for f in futures)
+after = cli('stats')
+assert after['passed'] - before['passed'] == sent and after['dropped'] == before['dropped'], (sent, before, after)
+print(f'PASS: {limit_reloads} changed 64-limit-rule production CLI reloads under four-CPU traffic; max={max(limit_times):.3f}s; exact {sent} stable-pass frames')
 
 # Maximum declared set population is also part of the one-second reload path.
 old.write_text('default pass\nset all ' + ' '.join(f'10.0.{i >> 8}.{i & 255}' for i in range(10000)) + '\ndrop src @all\n')

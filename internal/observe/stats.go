@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 
 	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
@@ -43,24 +44,28 @@ func better(a, b contract.SourceCount) bool {
 	return a.Packets > b.Packets || a.Packets == b.Packets && compareAddress(a.Src, b.Src) < 0
 }
 func jailFrom(state contract.JailState) ([]contract.JailEntry, error) {
-	active := make(map[contract.Address]uint64)
+	// Sort detached active records directly. A map plus a separate key sort and
+	// a second million hash lookups costs considerably more at jail capacity.
+	active := make([]contract.JailRecord, 0, len(state.Jails))
 	for _, j := range state.Jails {
-		if j.UntilNS > state.NowNS && j.UntilNS > active[j.Src] {
-			active[j.Src] = j.UntilNS
+		if j.UntilNS > state.NowNS {
+			active = append(active, j)
 		}
 	}
-	keys := make([]contract.Address, 0, len(active))
-	for key := range active {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool { return compareAddress(keys[i], keys[j]) < 0 })
-	result := make([]contract.JailEntry, 0, len(keys))
-	for _, key := range keys {
-		src, err := address(key)
+	slices.SortFunc(active, func(a, b contract.JailRecord) int { return compareAddress(a.Src, b.Src) })
+	result := make([]contract.JailEntry, 0, len(active))
+	for i := 0; i < len(active); {
+		j := active[i]
+		i++
+		for i < len(active) && active[i].Src == j.Src {
+			j.UntilNS = max(j.UntilNS, active[i].UntilNS)
+			i++
+		}
+		src, err := address(j.Src)
 		if err != nil {
 			return nil, err
 		}
-		delta := active[key] - state.NowNS
+		delta := j.UntilNS - state.NowNS
 		seconds := delta / 1000000000
 		if delta%1000000000 != 0 {
 			seconds++
@@ -125,10 +130,18 @@ func statsFrom(state contract.State) (Stats, error) {
 		}
 		s.TopSources = append(s.TopSources, contract.SourceStats{Src: text, Packets: src.Packets})
 	}
-	jail, err := jailFrom(contract.JailState{NowNS: state.NowNS, Jails: state.Jails})
-	if err != nil {
-		return Stats{}, err
+	// Stats needs a count, not a sorted/formatted million-entry jail response.
+	// Deduplicate batch reads without allocating canonical strings or JSON rows.
+	active := make(map[contract.Address]struct{}, len(state.Jails))
+	for _, j := range state.Jails {
+		if j.UntilNS <= state.NowNS {
+			continue
+		}
+		if j.Src.Family != 4 && j.Src.Family != 6 {
+			return Stats{}, fmt.Errorf("invalid address family %d", j.Src.Family)
+		}
+		active[j.Src] = struct{}{}
 	}
-	s.JailedSources = uint64(len(jail))
+	s.JailedSources = uint64(len(active))
 	return s, nil
 }

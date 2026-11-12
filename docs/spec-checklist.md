@@ -20,12 +20,20 @@ acceptance. See [integration validation](integration-validation.md) and
 - [x] Bounce MAC-only mutation and unchanged honeypot redirect (private veth wire checks).
 - [x] Exact per-rule/global counters, exact source ranking and numeric ordering.
   - [x] Four-CPU kernel/source accounting plus deterministic CLI/HTTP equivalence.
+  - [x] Interrupted test-run replay regression; exact assertions retained.
+  - [x] Full source/jail/scan capacities and exhaustion/recovery (WSL; see follow-up evidence).
 - [x] Atomic reload, safe old-object lifetime, persistence, fresh rule counters.
   - [ ] Long-run reclamation and worst-case Linux 6.8 reload timing.
+  - [x] Repeated changed 64-limit policies: retired kernel program/map IDs reclaimed (WSL).
+  - [x] Million-source plus million-jail stats snapshot measured below one second (WSL).
 - [x] Event ABI, lossless sustained daemon logging above 20k/s, newest 1000 history/log.
 - [x] Complete dashboard panels, pps, jail and latest events; real browser screenshot.
 - [x] CLI grammar/timings/error behavior and failed-start rollback tests (local fixtures).
-- [ ] Fresh Ubuntu 24.04 x86-64 build/runtime and four-CPU stress verification.
+- [ ] Fresh native Ubuntu 24.04 x86-64 build/runtime and four-CPU stress verification.
+  The acceptance runner rejects containers, VMs, emulation and unavailable or
+  failed virtualization detection; mocked detector checks are not target evidence.
 - [ ] Benchmark, README test evidence and actual dashboard screenshot.
   - [x] README, sustained logging/reload measurements and actual dashboard screenshot.
   - [ ] Target flood speed/NIC throughput benchmark.
+  - [x] Sustained four-CPU private-veth flood, exact verdict totals and recorded method.
+  - [ ] All full-capacity CLI deadlines: million-entry jail timeout/stats timing remain open.

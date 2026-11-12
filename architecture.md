@@ -71,11 +71,17 @@ older verifiers prune unused features despite variable rule indices. Generic
 kernel fixtures keep every feature enabled; packet decisions remain inside XDP.
 Mutation serialization and snapshot read locks protect collection/metadata
 lifetime. All source/jail map reads use batches; jail reads take BPF_F_LOCK.
+Full stats reads source/jail maps concurrently while retaining the generation
+read lock until both complete, including error paths. Stats counts distinct active
+jails without formatting/sorting the separate jail-list response.
 Private limit-map allocation uses at most four workers to meet the measured
 reload budget; each rule still owns a separate LRU with at least 65,536 usable
 source entries, plus 128 allocated slots per possible CPU for kernel free-node
 reserves. The existing
 template serves the first rule. All preparation workers finish before publication.
+Independent private inner-map allocation overlaps verification. Both normal and
+failed candidates join the bounded worker group before returning or publishing;
+this reduces maximum-policy latency without reusing in-flight mutable state.
 
 A complete candidate is parsed and validated before active state changes. A
 packet must select one complete immutable configuration, including rules and set

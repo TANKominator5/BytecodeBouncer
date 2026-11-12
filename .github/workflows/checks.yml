@@ -2,6 +2,9 @@ name: Firewall checks
 on: [push, pull_request]
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -11,7 +14,17 @@ jobs:
         with:
           go-version: '1.22.x'
           cache: true
-      - run: sudo apt-get update && sudo apt-get install -y clang llvm libbpf-dev linux-libc-dev gcc make iproute2 python3
+      - name: Install build dependencies
+        timeout-minutes: 5
+        run: |
+          # Ubuntu's authoritative DNS outage affects Azure AND canonical
+          # ubuntu.com hosts. This mirror has independent DNS; apt still
+          # verifies every index/package against the Ubuntu archive keyring.
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            printf '%s\n' 'https://mirrors.edge.kernel.org/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::https::Timeout=20 -o APT::Update::Error-Mode=any update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::https::Timeout=20 install -y clang llvm libbpf-dev linux-libc-dev gcc make iproute2 python3
       - run: ./build.sh
       - run: make test
       - run: sudo tests/integration/bootstrap.sh

@@ -127,6 +127,29 @@ func TestCanonicalAddresses(t *testing.T) {
 	}
 }
 
+func TestStatsCountsJailWithoutFormattingRows(t *testing.T) {
+	a := rawAddress("2001:db8::1")
+	s, err := statsFrom(contract.State{NowNS: 100, Jails: []contract.JailRecord{{Src: a, UntilNS: 101}, {Src: a, UntilNS: 200}, {Src: rawAddress("192.0.2.1"), UntilNS: 99}}})
+	if err != nil || s.JailedSources != 1 {
+		t.Fatalf("count=%d err=%v", s.JailedSources, err)
+	}
+	_, err = statsFrom(contract.State{Jails: []contract.JailRecord{{Src: contract.Address{Family: 9}, UntilNS: 1}}})
+	if err == nil {
+		t.Fatal("invalid active jail identity accepted")
+	}
+}
+
+func TestJailSortDeduplicatesWithoutMutatingInput(t *testing.T) {
+	a, b := rawAddress("2001:db8::1"), rawAddress("10.0.0.2")
+	state := contract.JailState{NowNS: 100, Jails: []contract.JailRecord{{Src: a, UntilNS: 1000000100}, {Src: b, UntilNS: 100}, {Src: b, UntilNS: 101}, {Src: a, UntilNS: 2000000101}}}
+	original := append([]contract.JailRecord(nil), state.Jails...)
+	got, err := jailFrom(state)
+	want := []contract.JailEntry{{Src: "10.0.0.2", SecondsLeft: 1}, {Src: "2001:db8::1", SecondsLeft: 3}}
+	if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(state.Jails, original) {
+		t.Fatalf("got=%+v err=%v input changed=%v", got, err, !reflect.DeepEqual(state.Jails, original))
+	}
+}
+
 func TestEventHistoryBarrierAndCopies(t *testing.T) {
 	f := newFakeStream()
 	state := &fakeState{state: contract.State{Generation: 1}}

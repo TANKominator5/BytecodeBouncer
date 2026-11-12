@@ -161,6 +161,43 @@ func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string
 			spec.Maps["sets"].Contents = append(spec.Maps["sets"].Contents, ebpf.MapKV{Key: config.SetKey(set.ID, prefix), Value: uint32(1)})
 		}
 	}
+	var keys, fds []uint32
+	for i, r := range cfg.Rules[:cfg.RuleCount] {
+		if r.Action == contract.Limit {
+			keys = append(keys, uint32(i))
+		}
+	}
+	inner := make([]*ebpf.Map, len(keys))
+	failures := make([]error, len(keys))
+	var workers sync.WaitGroup
+	defer func() {
+		// Also join on verifier/allocation failure before releasing candidates.
+		workers.Wait()
+		for i, m := range inner {
+			if i > 0 && m != nil {
+				m.Close()
+			}
+		}
+	}()
+	if len(keys) > 0 {
+		// Verification and private LRU allocation are independent. Overlap both
+		// costs, but join every worker before linking maps or publishing policy.
+		innerSpec := spec.Maps["buckets"].InnerMap.Copy()
+		jobs := make(chan int, len(keys))
+		for i := 1; i < len(keys); i++ {
+			jobs <- i
+		}
+		close(jobs)
+		for worker := 0; worker < 4; worker++ {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for i := range jobs {
+					inner[i], failures[i] = ebpf.NewMap(innerSpec.Copy())
+				}
+			}()
+		}
+	}
 	c, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: replacements})
 	if err != nil {
 		return nil, nil, fmt.Errorf("load XDP: %w", err)
@@ -170,41 +207,9 @@ func (p *Plane) prepare(policy *config.Policy, version uint64, shared map[string
 			c.Close()
 		}
 	}()
-	var keys, fds []uint32
-	for i, r := range cfg.Rules[:cfg.RuleCount] {
-		if r.Action == contract.Limit {
-			keys = append(keys, uint32(i))
-		}
-	}
-	inner := make([]*ebpf.Map, len(keys))
-	defer func() {
-		for i, m := range inner {
-			if i > 0 && m != nil {
-				m.Close()
-			}
-		}
-	}()
+	workers.Wait()
 	if len(keys) > 0 {
 		inner[0] = c.Maps["bucket_template"]
-		// Independent LRU maps are memory-heavy. Allocate private candidates on
-		// at most four workers, never parallelize mutation/publication itself.
-		jobs := make(chan int, len(keys))
-		for i := 1; i < len(keys); i++ {
-			jobs <- i
-		}
-		close(jobs)
-		failures := make([]error, len(keys))
-		var workers sync.WaitGroup
-		for worker := 0; worker < 4; worker++ {
-			workers.Add(1)
-			go func() {
-				defer workers.Done()
-				for i := range jobs {
-					inner[i], failures[i] = ebpf.NewMap(spec.Maps["buckets"].InnerMap.Copy())
-				}
-			}()
-		}
-		workers.Wait()
 		for i, m := range inner {
 			if failures[i] != nil {
 				return nil, nil, failures[i]
