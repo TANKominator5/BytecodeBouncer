@@ -49,7 +49,7 @@ assert after['passed']+after['dropped']+after['bounced']+after['honeypotted']>=3
 with urllib.request.urlopen('http://127.0.0.1:8088/stats.json',timeout=1) as r: web=json.load(r)
 assert set(web)==set(after)
 assert web['passed']>=after['passed']
-with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'BYTECODE' in r.read()
+with urllib.request.urlopen('http://127.0.0.1:8088/',timeout=1) as r: assert b'Bytecode Bouncer' in r.read()
 assert call('reload','/nonexistent/trafficcop.rules').returncode==1
 assert call('reload','tests/fixtures/bootstrap.rules').returncode==0
 reloaded=json.loads(call('stats').stdout)
