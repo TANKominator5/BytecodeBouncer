@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net/netip"
-	"slices"
 	"sort"
 
 	"github.com/TANKominator5/BytecodeBouncer/internal/contract"
@@ -52,7 +51,7 @@ func jailFrom(state contract.JailState) ([]contract.JailEntry, error) {
 			active = append(active, j)
 		}
 	}
-	slices.SortFunc(active, func(a, b contract.JailRecord) int { return compareAddress(a.Src, b.Src) })
+	orderJails(active)
 	result := make([]contract.JailEntry, 0, len(active))
 	for i := 0; i < len(active); {
 		j := active[i]
@@ -131,8 +130,9 @@ func statsFrom(state contract.State) (Stats, error) {
 		s.TopSources = append(s.TopSources, contract.SourceStats{Src: text, Packets: src.Packets})
 	}
 	// Stats needs a count, not a sorted/formatted million-entry jail response.
-	// Deduplicate batch reads without allocating canonical strings or JSON rows.
-	active := make(map[contract.Address]struct{}, len(state.Jails))
+	// Order/deduplicate batch reads without hashing a million keys or allocating
+	// canonical strings/JSON rows. This uses the same numeric ordering as Jail.
+	active := make([]contract.JailRecord, 0, len(state.Jails))
 	for _, j := range state.Jails {
 		if j.UntilNS <= state.NowNS {
 			continue
@@ -140,8 +140,13 @@ func statsFrom(state contract.State) (Stats, error) {
 		if j.Src.Family != 4 && j.Src.Family != 6 {
 			return Stats{}, fmt.Errorf("invalid address family %d", j.Src.Family)
 		}
-		active[j.Src] = struct{}{}
+		active = append(active, j)
 	}
-	s.JailedSources = uint64(len(active))
+	orderJails(active)
+	for i, j := range active {
+		if i == 0 || j.Src != active[i-1].Src {
+			s.JailedSources++
+		}
+	}
 	return s, nil
 }

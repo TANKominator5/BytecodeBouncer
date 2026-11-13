@@ -56,14 +56,7 @@ func CallRequest(request Request) (json.RawMessage, error) {
 	if err = json.NewEncoder(c).Encode(request); err != nil {
 		return nil, err
 	}
-	var r Response
-	if err = json.NewDecoder(c).Decode(&r); err != nil {
-		return nil, err
-	}
-	if r.Error != "" {
-		return nil, errors.New(r.Error)
-	}
-	return r.Data, nil
+	return readResponse(c)
 }
 func Run(iface, rules, honeypot string, ready *os.File) (runErr error) {
 	notified := false
@@ -244,7 +237,7 @@ func Run(iface, rules, honeypot string, ready *os.File) (runErr error) {
 				response.Error = "command not implemented in bootstrap"
 			}
 		}
-		json.NewEncoder(conn).Encode(response)
+		writeResponse(conn, response)
 		conn.Close()
 		if stop {
 			return nil

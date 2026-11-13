@@ -67,7 +67,9 @@ func run(args []string) error {
 		return err
 	}
 	if printJSON {
-		fmt.Println(string(data))
+		if _, err := os.Stdout.Write(append(data, '\n')); err != nil {
+			return err
+		}
 	}
 	return nil
 }
