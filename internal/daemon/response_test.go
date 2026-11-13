@@ -27,7 +27,14 @@ func TestResponseFraming(t *testing.T) {
 	if data, err := readResponse(&wire); err == nil || err.Error() != "bad policy" || data != nil {
 		t.Fatal(data, err)
 	}
-	for _, bad := range []string{"", "{}\n", "not json\n", "{\"version\":1,\"length\":-1}\n", "{\"version\":1,\"length\":134217729}\n", "{\"version\":1,\"length\":1,\"error\":\"bad\"}\n", "{\"version\":1,\"length\":10}\n[]", strings.Repeat("x", 8192)} {
+	longMessage := strings.Repeat("x\\\"\n", 5000)
+	if err := writeResponse(&wire, Response{Error: longMessage}); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := readResponse(&wire); err == nil || err.Error() != longMessage || data != nil {
+		t.Fatalf("long error round trip: data=%q err=%v", data, err)
+	}
+	for _, bad := range []string{"", "{}\n", "not json\n", "{\"version\":1,\"length\":-1}\n", "{\"version\":1,\"length\":134217729}\n", "{\"version\":1,\"error_length\":134217729}\n", "{\"version\":1,\"error\":true,\"length\":1,\"error_length\":2}\n", "{\"version\":1,\"error\":false,\"error_length\":2}\nxx", "{\"version\":1,\"error\":true,\"error_length\":2}\n{}", "{\"version\":1,\"length\":10}\n[]", "{\"version\":1,\"error\":\"legacy error\"}\n", strings.Repeat("x", 8192)} {
 		if _, err := readResponse(strings.NewReader(bad)); err == nil {
 			t.Fatalf("accepted %q", bad)
 		}

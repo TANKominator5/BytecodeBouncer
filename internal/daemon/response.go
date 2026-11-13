@@ -15,22 +15,36 @@ import (
 const maxResponseBytes = 128 << 20
 
 type responseHeader struct {
-	Version int    `json:"version"`
-	Length  int    `json:"length"`
-	Error   string `json:"error,omitempty"`
+	Version     int  `json:"version"`
+	Length      int  `json:"length"`
+	Error       bool `json:"error,omitempty"`
+	ErrorLength int  `json:"error_length,omitempty"`
 }
 
 func writeResponse(w io.Writer, r Response) error {
 	if len(r.Data) > maxResponseBytes {
 		return fmt.Errorf("response exceeds IPC limit")
 	}
+	var errorPayload []byte
 	if r.Error != "" {
 		r.Data = nil
+		var err error
+		errorPayload, err = json.Marshal(r.Error)
+		if err != nil {
+			return err
+		}
+		if len(errorPayload) > maxResponseBytes {
+			return fmt.Errorf("response exceeds IPC limit")
+		}
 	}
-	if err := json.NewEncoder(w).Encode(responseHeader{Version: 1, Length: len(r.Data), Error: r.Error}); err != nil {
+	if err := json.NewEncoder(w).Encode(responseHeader{Version: 1, Length: len(r.Data), Error: len(errorPayload) != 0, ErrorLength: len(errorPayload)}); err != nil {
 		return err
 	}
-	_, err := io.Copy(w, bytes.NewReader(r.Data))
+	payload := r.Data
+	if len(errorPayload) > 0 {
+		payload = errorPayload
+	}
+	_, err := io.Copy(w, bytes.NewReader(payload))
 	return err
 }
 
@@ -41,14 +55,28 @@ func readResponse(r io.Reader) (json.RawMessage, error) {
 		return nil, err
 	}
 	var h responseHeader
-	if err := json.Unmarshal(header, &h); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(header))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&h); err != nil {
 		return nil, err
 	}
-	if h.Version != 1 || h.Length < 0 || h.Length > maxResponseBytes || h.Error != "" && h.Length != 0 {
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("invalid IPC response header")
+	}
+	if h.Version != 1 || h.Length < 0 || h.Length > maxResponseBytes || h.ErrorLength < 0 || h.ErrorLength > maxResponseBytes || h.Error && h.Length != 0 || h.Error != (h.ErrorLength != 0) {
 		return nil, fmt.Errorf("invalid IPC response header (restart daemon after upgrading)")
 	}
-	if h.Error != "" {
-		return nil, errors.New(h.Error)
+	if h.Error {
+		payload := make([]byte, h.ErrorLength)
+		if _, err := io.ReadFull(br, payload); err != nil {
+			return nil, err
+		}
+		var message string
+		if err := json.Unmarshal(payload, &message); err != nil {
+			return nil, fmt.Errorf("invalid IPC error payload: %w", err)
+		}
+		return nil, errors.New(message)
 	}
 	data := make(json.RawMessage, h.Length)
 	_, err = io.ReadFull(br, data)

@@ -77,7 +77,9 @@ jails without formatting/sorting the separate jail-list response.
 Large jail snapshots use numeric stable byte-radix ordering; stats deduplicates
 identities in that order instead of building a million-key hash table. Private
 control replies use a versioned, bounded JSON header and length-delimited JSON
-payload, avoiding envelope re-encoding and client rescanning of large responses.
+payload. Error diagnostics use the same bounded payload framing as successful
+responses, so long parser errors round-trip without growing the header beyond the
+reader limit. This avoids envelope re-encoding and client rescanning of large responses.
 CLI and HTTP public JSON layouts are unchanged. Restart on binary upgrades.
 Private limit-map allocation uses at most four workers to meet the measured
 reload budget; each rule still owns a separate LRU with at least 65,536 usable
