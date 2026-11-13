@@ -27,16 +27,19 @@ var _ contract.CounterReader = (*Plane)(nil)
 var _ contract.StateReader = (*Plane)(nil)
 
 type Plane struct {
-	change     sync.Mutex   // Serializes prepare/publish, live edits, unjail and stop.
-	mu         sync.RWMutex // A snapshot pins one complete generation until it finishes.
-	closed     bool
-	collection *ebpf.Collection
-	attachment link.Link
-	spec       *ebpf.CollectionSpec
-	policy     *config.Policy
-	version    uint64
-	honeypot   uint32
-	stream     *eventStream
+	change          sync.Mutex   // Serializes prepare/publish, live edits, unjail and stop.
+	mu              sync.RWMutex // A snapshot pins one complete generation until it finishes.
+	closed          bool
+	collection      *ebpf.Collection
+	attachment      link.Link
+	spec            *ebpf.CollectionSpec
+	policy          *config.Policy
+	version         uint64
+	honeypot        uint32
+	stream          *eventStream
+	maintenanceStop chan struct{}
+	maintenanceDone chan struct{}
+	maintenanceErr  error // protected by mu, surfaced by ReadHealth
 }
 
 // Attach preserves the bootstrap entry point for existing callers/tests.
@@ -80,6 +83,7 @@ func AttachPolicy(ifname, hpname string, policy *config.Policy) (*Plane, error) 
 	p.collection = c
 	p.attachment = l
 	p.policy = owned
+	p.startMaintenance()
 	return p, nil
 }
 func clonePolicy(p *config.Policy) *config.Policy {
@@ -345,6 +349,11 @@ func (p *Plane) Unjail(address netip.Addr) error {
 func (p *Plane) Close() error {
 	p.change.Lock()
 	defer p.change.Unlock()
+	if p.maintenanceStop != nil {
+		close(p.maintenanceStop)
+		<-p.maintenanceDone
+		p.maintenanceStop = nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {

@@ -2,7 +2,12 @@
 #define TRAFFICCOP_CONTRACT_H
 #include <linux/types.h>
 #include <linux/bpf.h>
-#define TC_ABI_VERSION 5
+#define TC_ABI_VERSION 6
+/* maintenance[0=jail,1=scans]: packet requests, control-only collector consumes. */
+#define TC_GC_IDLE 0ULL
+#define TC_GC_BUSY 1ULL
+#define TC_GC_REQUESTED 2ULL
+#define TC_GC_BATCH 256
 #define TC_MAX_RULES 64
 #define TC_MAX_JAIL_SECONDS 3600
 #define TC_MAX_SETS 16

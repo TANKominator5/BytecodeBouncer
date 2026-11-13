@@ -22,6 +22,9 @@ acceptance. See [integration validation](integration-validation.md) and
   - [x] Four-CPU kernel/source accounting plus deterministic CLI/HTTP equivalence.
   - [x] Interrupted test-run replay regression; exact assertions retained.
   - [x] Full source/jail/scan capacities and exhaustion/recovery (WSL; see follow-up evidence).
+  - [x] ABI v6 off-packet collection: coalescing/batch bounds, generation pinning,
+    cancellation, concurrency and lifecycle regressions on Linux 6.8 VM.
+    Reduced-scale pressure measured; full-size four-CPU acceptance remains open.
 - [x] Atomic reload, safe old-object lifetime, persistence, fresh rule counters.
   - [ ] Long-run reclamation and worst-case Linux 6.8 reload timing.
   - [x] Repeated changed 64-limit policies: retired kernel program/map IDs reclaimed (WSL).

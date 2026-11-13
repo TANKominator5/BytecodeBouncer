@@ -138,6 +138,11 @@ See [ABI and B/C handoff](docs/dataplane-abi.md) and
 [actual validation/limitations](docs/dataplane-validation.md). The ABI includes
 explicit diagnostic counters for finite map capacity and event-ring failures.
 
+State-map pressure now requests off-packet BPF collection instead of walking a
+full map on ingress (ABI v6; restart the daemon on upgrade). See
+[reclamation validation](docs/reclamation-validation.md) for Linux 6.8 VM results
+and the still-open four-CPU/full-capacity acceptance.
+
 The daemon reports readiness through a pipe, owns an exclusive lock and private
 Unix socket under `/run/trafficcop`, and embeds its web assets. No BPF maps are
 pinned. Stop releases the XDP link, map/program descriptors, control socket and

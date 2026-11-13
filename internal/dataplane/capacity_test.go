@@ -216,6 +216,9 @@ func TestKernelFullStateCapacity(t *testing.T) {
 				}
 			}
 			start = time.Now()
+			collectRequested(t, p.collection)
+			t.Logf("off-packet recovery sweep latency: %s", time.Since(start))
+			start = time.Now()
 			want = pass
 			if name == "jail" {
 				want = drop

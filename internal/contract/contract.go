@@ -3,7 +3,7 @@
 package contract
 
 const (
-	ABIVersion     = 5
+	ABIVersion     = 6
 	MaxRules       = 64
 	MaxSets        = 16
 	MaxPrefixes    = 10000
@@ -19,6 +19,13 @@ const (
 	UnjailOK       = 1
 	UnjailAbsent   = 2
 	UnjailRetry    = 3
+)
+
+const (
+	GCIdle      uint64 = 0
+	GCBusy      uint64 = 1
+	GCRequested uint64 = 2
+	GCBatch            = 256
 )
 const (
 	SrcPrefix = 1 << iota
