@@ -56,8 +56,12 @@ sudo ./demo.sh dashboard
 
 The last command runs a foreground localhost proxy. Open **http://127.0.0.1:8088/**
 in your normal browser. Ctrl+C stops the proxy; the demo remains running.
-The proxy uses Python's standard library and forwards only fixed dashboard
-assets/JSON endpoints into the namespace. It fails if host port 8088 is busy.
+The proxy uses Python's standard library and forwards live telemetry JSON into
+the namespace. It fails if host port 8088 is busy. Dashboard HTML, CSS,
+JavaScript, and fonts are read directly from `internal/observe/web/`, so
+frontend edits appear on a browser refresh without rebuilding or restarting the
+demo; restart the proxy only if `tests/bench/dashboard_proxy.py` changes.
+Go or BPF changes still require `./build.sh` and a demo restart.
 The demo loads `tests/fixtures/demo.rules`. To generate illustrated traffic:
 
 ```sh
@@ -118,13 +122,32 @@ Finite state limits and target-platform gaps are documented in
 
 ## Dashboard
 
-Maintainer follow-up results and remaining target-hardware requirements:
+The embedded dashboard is a dark, hairline-framed operations console using the
+locally bundled Monocraft pixel font (OFL; see
+`internal/observe/web/fonts/OFL.txt`). It refreshes every second from the same
+read-only endpoints as the CLI and makes no external asset requests. Maintainer
+follow-up results and target-hardware requirements:
 [remaining-work validation](docs/remaining-work-validation.md).
 
-Embedded HTML/CSS/JavaScript updates every second, including passed/dropped pps,
-rule hits, source ranking, jail, latest events, malformed/other and diagnostics.
-No frontend dependencies. Actual isolated-demo screenshot (traffic idle at capture,
-so pps is zero; totals come from real XDP decisions on synthetic frames):
+- **Packet flow** — pass/drop rates from cumulative counter deltas over a
+  30-sample, one-second window. The icon toggle switches between a zero-center
+  diverging chart and stacked pass/drop bars; the choice is page-local.
+- **Rule activity** — first-match policy order, exact hits, verdict splits and a
+  compact hit bar.
+- **Noisiest sources** — the top five source addresses with normalized packet
+  bars and exact counts, separated by hairlines.
+- **Timeout corner** and **Recent events** — current jail entries with remaining
+  time and the latest 20 logged decisions, including verdict and packet fields.
+- **System telemetry** — malformed, non-IP, jail-drop, default-hit, address-set
+  and event-loss counters; `/health.json` failures raise a visible warning.
+
+The HTML, CSS, JavaScript and fonts are embedded in the Go binary and served
+under the existing CSP. The isolated demo proxy reads them from
+`internal/observe/web/` on every request, so frontend edits appear on a browser
+refresh without rebuilding or restarting the demo.
+
+Actual isolated-demo capture (traffic idle at capture, so pps is zero; totals
+come from real XDP decisions on synthetic frames):
 
 ![Live Bytecode Bouncer dashboard](docs/dashboard.png)
 
